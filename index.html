@@ -1400,6 +1400,7 @@
 
         let skillDetailOpened = {};        
         let selectedDetailUserId = null;
+        const selectedDetailSkillName = {};
         let dpsChart = null;
         let dpsChartData = [];
         let maxDataPoints = 120; // 2분 데이터로 축소 (성능 개선)
@@ -1654,10 +1655,13 @@
                     if (isActive) {
                         detail.classList.remove('active');
                         skillDetailOpened[skillId] = false;
+                        selectedDetailSkillName[selectedDetailUserId] = null;
                     } else {
                         detail.classList.add('active');
                         skillDetailOpened[skillId] = true;
+                        selectedDetailSkillName[selectedDetailUserId] = detail.dataset.skill;
                     }
+                    showDetailModal(selectedDetailUserId);
                 }
             });
         })()
@@ -1780,10 +1784,14 @@
                             if (isActive) {
                                 detailRow.classList.remove('active');
                                 skillDetailOpened[skillId] = false;
+                                selectedDetailSkillName[uid] = null;
                             } else {
                                 detailRow.classList.add('active');
                                 skillDetailOpened[skillId] = true;
+                                selectedDetailSkillName[uid] = detailRow.dataset.skill;
                             }
+                            renderDetailStats(uid, document.querySelector('.card-stats').parentElement);
+                            renderDetailBuffs(uid, document.querySelector('.buff-stats').parentElement);
                         }
                     });
                 });
@@ -1794,7 +1802,8 @@
         
         function renderDetailStats(uid, container) {
             const tid = getTargetID();
-            const db = singleMode ? damageDB2[uid][tid][""] : damageDB[uid][tid][""];
+            const skill = selectedDetailSkillName[uid] ?? "";
+            const db = singleMode ? damageDB2[uid][tid][skill] : damageDB[uid][tid][skill];
             
             const critRate = calcCritHitPercent(db);
             const addhitRate = calcAddHitPercent(db);
@@ -1827,8 +1836,9 @@
         
         function renderDetailBuffs(uid, container) {
             const tid = getTargetID();
-            const db = singleMode ? damageDB2[uid][tid][""] : damageDB[uid][tid][""];
-            const buffs = buffDB[uid] ? buffDB[uid][tid][""] : {};
+            const skill = selectedDetailSkillName[uid] ?? "";
+            const db = singleMode ? damageDB2[uid][tid][skill] : damageDB[uid][tid][skill];
+            const buffs = buffDB[uid] ? buffDB[uid][tid][skill] : {};
             
             const types = {"룬":1, "스킬":11, "시너지":12, "적":21, "펫":31};
             const colors = {1:"E68A2E", 11:"2E7DD9", 12:"36CC6D", 21:"A05ED9", 31:"E65A9C"};
@@ -1941,7 +1951,8 @@
         }
         function renderDetail(uid) {
             const tid = getTargetID();
-            const db = singleMode  ? damageDB2[uid][tid][""] : damageDB[uid][tid][""]; 
+            const skill = selectedDetailSkillName[uid] ?? "";
+            const db = singleMode ? damageDB2[uid][tid][skill] : damageDB[uid][tid][skill]; 
             
             const rank = calcSortedItems().findIndex(([id, item]) => id === uid);
             const critRate  = calcCritHitPercent(db);
@@ -2041,7 +2052,7 @@
                     <div class="skill-crit">${row.detail.crit}%</div>
                     <div class="skill-addhit">${row.detail.addhit}%</div>
                 </div>
-                <div id="${id}" class="skill-detail-row${skillDetailOpened[id] ? ' active' : ''}">
+                <div id="${id}" data-skill="${row.skill}" class="skill-detail-row${skillDetailOpened[id] ? ' active' : ''}">
                     <div>
                         <div>일반 데미지</div>
                         <div><span>타수</span><span>${row.normal.total_count.toLocaleString()}</span></div>
@@ -2376,6 +2387,7 @@
    
             selectedDetailUserId = null;
             skillDetailOpened = {};
+            Object.keys(selectedDetailSkillName).forEach(key => delete selectedDetailSkillName[key]);
             
             // 차트 완전 초기화
             dpsChartData = [];
@@ -2730,7 +2742,7 @@
             let isConnected = false;
 
             function onConnectionChanged(connected) {
-                isConnected = connect;
+                isConnected = connected;
                 const ctrl = document.getElementById('connectSym');
                 if (connected) {
                     ctrl.classList.add("status-connected")

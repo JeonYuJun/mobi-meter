@@ -507,6 +507,7 @@ class UserData:
 @dataclass
 class BuffInstData:
     buff_type: int = 0
+    buff_flag: int = 0
     buff_name: str = ""
     buff_stack: int = 0
     tid: int = 0
@@ -795,7 +796,7 @@ class CombatLogAnalyzer:
     def _update_buff_uptime(cc:BuffUptimeContainer, uid, tid, skill, tmpdata: UserTmpData):
         gc = CombatLogAnalyzer._get_buff_uptime_container
         for buff_name, buff_stack in tmpdata.buff.items():
-            for c in [gc(cc,uid,0,"",buff_name), gc(cc,uid,tid,"",buff_name)]:
+            for c in [gc(cc,uid,0,"",buff_name), gc(cc,uid,tid,"",buff_name), gc(cc,uid,0,skill,buff_name), gc(cc,uid,tid,skill,buff_name)]:
                 CombatLogAnalyzer._update_buff_uptime_data(c, buff_stack)
 
     @staticmethod
@@ -814,9 +815,12 @@ class CombatLogAnalyzer:
         prev_stack = data.buff_stack
         user_data  = utdc[uid]
         if buff_detail:
+            data.buff_type     = buff_detail.get("type", 0)
+            data.buff_flag     = buff_detail.get("flag", 0)
+            if data.buff_flag > 0:
+                stack = data.buff_stack = 1 if stack > 0 else 0
             user_data.atk_buff += (stack-prev_stack) * buff_detail.get("atk", 0)
             user_data.dmg_buff += (stack-prev_stack) * buff_detail.get("dmg", 0)
-            data.buff_type     = buff_detail.get("type", 0)
         if stack > 0:
             data.buff_name  = buff_name
             data.buff_stack = stack
