@@ -1,3 +1,4 @@
+# 필요한 라이브러리 임포트
 import asyncio
 import json
 import brotli
@@ -6,10 +7,12 @@ from websockets import serve
 from scapy.all import AsyncSniffer, Packet, Raw
 from scapy.layers.inet import TCP
 
-DEBUG = False
-PORT = 8080
-IFACE = None
+# 전역 설정 변수
+DEBUG = False  # 디버그 모드
+PORT = 8080    # WebSocket 서버 포트
+IFACE = None   # 네트워크 인터페이스
 
+# 공격 플래그 비트 정의 (각 플래그가 어떤 공격 타입인지 나타냄)
 FLAG_BITS = (
     (0, 'crit_flag', 0x01),
     (0, 'what1', 0x02),
@@ -62,6 +65,7 @@ FLAG_BITS = (
     (4, 'what48', 0x80),
 )
 
+# 플래그 바이트에서 각 비트를 추출하여 딕셔너리로 변환
 @lru_cache(maxsize=256)
 def extract_flags(flags: bytes) -> dict:
     result = {}
@@ -69,6 +73,7 @@ def extract_flags(flags: bytes) -> dict:
         result[name] = int((flags[index] & mask) != 0) if index < len(flags) else 0
     return result
 
+# 공격 패킷 파싱 (타입 10308)
 def parse_attack(data):
     if len(data) != 35:
         return ""
@@ -96,6 +101,7 @@ def parse_attack(data):
         #"etc": f"a:{key2}, c:{c}",
     }
 
+# 스킬 사용 패킷 파싱 (타입 100041)
 def parse_action(data):
     pivot = 0
 
@@ -121,6 +127,7 @@ def parse_action(data):
         "key1": key1,
     }
 
+# HP 변화 패킷 파싱 (타입 100178)
 def parse_hp_changed(data):
     pivot = 0
 
@@ -140,6 +147,7 @@ def parse_hp_changed(data):
         "current_hp": current,
     }
 
+# 자가 데미지 패킷 파싱 (타입 10719)
 def parse_self_damage(data):
     if len(data) != 53:
         return ""
@@ -169,6 +177,7 @@ def parse_self_damage(data):
         "flags": extract_flags(flags),
     }
 
+# 공격력 패킷 파싱 (타입 100085)
 def parse_atk(data):
     if len(data) != 16:
         return ""
@@ -188,6 +197,7 @@ def parse_atk(data):
         "atk": atk,
     }
 
+# 버프 시작 패킷 파싱 (타입 100046)
 def parse_buff(data):
     pivot = 0
 
@@ -230,6 +240,7 @@ def parse_buff(data):
         "hex": payload_hex,
     }
 
+# 버프 업데이트 패킷 파싱 (타입 100049)
 def parse_buff_update(data):
 
     pivot = 0
@@ -274,6 +285,7 @@ def parse_buff_update(data):
         "hex": payload_hex,
     }
 
+# 버프 종료 패킷 파싱 (타입 100047)
 def parse_buff_end(data):
     pivot = 0
 
@@ -301,6 +313,7 @@ def parse_buff_end(data):
         "hex": payload_hex,
     }
 
+# 패킷 타입별 파싱 함수 매핑
 parse_dict = {
     10308: parse_attack,
     100041: parse_action,      
@@ -312,13 +325,15 @@ parse_dict = {
     100047: parse_buff_end,
     }
 
+# TCP 시퀀스 번호 관련 상수 및 함수
 SEQ_MOD = 2**32
 
 def seq_distance(a, b):
     return ((a - b + 2**31) % 2**32) - 2**31
 
+# 네트워크 패킷을 캡처하고 처리하는 메인 클래스
 class PacketStreamer:
-    def __init__(self, filter_expr: str = "tcp and src port 16000"):
+    def __init__(self, filter_expr: str = "tcp and src port 16000"):  # 마비노기 서버 포트 16000
         self.queue: asyncio.Queue[Packet] = asyncio.Queue()
         self.sniffer = AsyncSniffer(filter=filter_expr, prn=self._enqueue_packet, iface=IFACE)
         self.loop = asyncio.get_event_loop()
@@ -327,6 +342,7 @@ class PacketStreamer:
         self.current_seq = None
         self.analyzer = CombatLogAnalyzer()
 
+    # WebSocket 클라이언트에게 데이터 스트리밍
     async def stream(self, websocket) -> None:
         self.sniffer.start()
         consumer_task = asyncio.create_task(self._process(websocket))
@@ -342,6 +358,7 @@ class PacketStreamer:
     def _enqueue_packet(self, pkt: Packet) -> None:
         self.loop.call_soon_threadsafe(self.queue.put_nowait, pkt)
 
+    # 바이너리 데이터에서 게임 패킷 파싱
     def _packet_parser(self, data: bytes) -> tuple[list,int]:
         res = []
         pivot = 0
@@ -349,7 +366,7 @@ class PacketStreamer:
 
         while(pivot < len(data)):
             
-            # 패킷 시작 부분 찾기
+            # 패킷 시작 부분 찾기 (마비노기 패킷 시그니처)
             start_pivot = data.find(b'\x68\x27\x00\x00\x00\x00\x00\x00\x00', pivot)
             if start_pivot == -1:
                 break
@@ -389,12 +406,13 @@ class PacketStreamer:
 
         return (res, pivot)
     
+    # TCP 패킷을 수집하고 재조립하는 메인 프로세스
     async def _process(self, websocket) -> None:
         while True:
             try:
                 pkt: Packet = await self.queue.get()
             except asyncio.CancelledError as e:
-                print(f"접속 끊음: {e}")
+                pass
                 break
 
             if pkt.haslayer(Raw):
@@ -433,9 +451,10 @@ class PacketStreamer:
                         for entry in parsed:
                             self.analyzer.update(entry)
                     except Exception as e:
-                        print(f"Error sending WebSocket message: {e}")
+                        pass
                         break
 
+    # 분석된 데이터를 주기적으로 WebSocket으로 전송
     async def _process2(self, websocket) -> None:
         while True:
             try:
@@ -444,11 +463,13 @@ class PacketStreamer:
             except asyncio.CancelledError as e:            
                 break
 
+# 데이터 분석 관련 임포트
 import time
 from dataclasses import dataclass, field, asdict, is_dataclass
 from collections import defaultdict
 from typing import Dict, Any, DefaultDict
 
+# 데미지 통계 데이터 클래스
 @dataclass
 class DamageData:
     total_damage: int = 0
@@ -460,12 +481,14 @@ class DamageData:
     max_damage: int = 0
     min_damage: int = 0
 
+# 버프 영향 데이터 클래스
 @dataclass
 class BuffImpactData:
     total_count: int = 0
     total_atk: float = 0
     total_dmg: float = 0
 
+# 힐 데이터 클래스
 @dataclass
 class HealData:
     total_heal: int = 0
@@ -473,6 +496,7 @@ class HealData:
     min_heal: int = 0
     max_heal: int = 0
 
+# 전투 상세 데이터 클래스 (모든 데미지 타입 포함)
 @dataclass
 class CombatDetailData:
     all: DamageData = field(default_factory=DamageData)
@@ -481,17 +505,20 @@ class CombatDetailData:
     special: DamageData = field(default_factory=DamageData)
     buff: BuffImpactData = field(default_factory=BuffImpactData)
 
+# 버프 지속시간 데이터 클래스
 @dataclass
 class BuffUptimeData:
     type: int = 0
     max_stack: int = 0
     total_stack: int = 0
 
+# 간단한 데미지 데이터 클래스
 @dataclass
 class SimpleDamageData:
     total_damage: int = 0
     id: int = 0
 
+# 적 정보 데이터 클래스
 @dataclass
 class EnemyData:
     max_hp: int = 0
@@ -500,10 +527,12 @@ class EnemyData:
     most_attacked_tid: int = 0
     last_attacked_tid: int = 0
 
+# 유저 정보 데이터 클래스
 @dataclass
 class UserData:
     job: str = ""
 
+# 버프 인스턴스 데이터 클래스
 @dataclass
 class BuffInstData:
     buff_type: int = 0
@@ -512,17 +541,20 @@ class BuffInstData:
     buff_stack: int = 0
     tid: int = 0
 
+# 유저 임시 데이터 클래스 (현재 버프 상태)
 @dataclass
 class UserTmpData:
     atk_buff: float = 0.0
     dmg_buff: float = 0.0
     buff: Dict[str, BuffInstData] = field(default_factory=dict[str,BuffInstData])
 
+# 타입 정의 (유저ID -> 타겟ID -> 스킬명 -> 데이터)
 DamageContainer = Dict[int, Dict[int, Dict[str, CombatDetailData]]]
 BuffUptimeContainer = Dict[int, Dict[int, Dict[str, Dict[str, BuffUptimeData]]]]
 BuffInstContainer = Dict[int, Dict[str, BuffInstData]]
 UserTmpDataContainer = DefaultDict[int, UserTmpData]
 
+# 도트 데미지 플래그와 한국어 이름 매핑
 dotFlag2Name = [
     ["bleed_flag", "출혈"],
     ["dark_flag", "암흑"],
@@ -535,16 +567,17 @@ dotFlag2Name = [
     ["dump_flag123", "무속성"]
 ]
 
+# 전투 로그를 분석하고 통계를 생성하는 메인 분석 클래스
 class CombatLogAnalyzer:
     def __init__(self):
         self._raw_data: Dict[int, Any] = {}
 
-        #main db
+        # 메인 데이터베이스
         self._damage_by_user_by_target_by_skill: DamageContainer = {0:{0:{"": CombatDetailData()}}}
         self._self_damage_by_user_by_target_by_skill: DamageContainer = {0:{0:{"": CombatDetailData()}}}
         self._buff_uptime_by_user_by_target_by_skill: BuffUptimeContainer = {0:{0:{"": {"": BuffUptimeData()}}}}
 
-        #tmp data
+        # 임시 데이터
         self._buff_by_user_by_inst: BuffInstContainer = {}
 
         self._time_data: Dict[int, Any] = {}
@@ -557,12 +590,25 @@ class CombatLogAnalyzer:
         self._self_damage_by_user: DefaultDict[int, SimpleDamageData] = defaultdict(SimpleDamageData)
         self._max_self_damage_by_user: SimpleDamageData = SimpleDamageData()
 
-        with open('content/_skills.json', 'r', encoding='utf-8') as f:
+        # 스킬 및 버프 데이터 파일 로드
+        import sys
+        import os
+        if getattr(sys, 'frozen', False):
+            # PyInstaller로 빌드된 exe 실행시 - 임시 폴더 사용
+            base_path = sys._MEIPASS
+        else:
+            base_path = os.path.dirname(os.path.abspath(__file__))
+        
+        # 데이터 파일 경로 설정
+        skills_path = os.path.join(base_path, '_skills.json')
+        buffs_path = os.path.join(base_path, '_buffs.json')
+        
+        with open(skills_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
             self._skill_code_2_name:Dict[str,str]        = data["Code2Name"]
             self._skill_rawname_2_name:Dict[str,str]     = data["RawName2Name"]
             self._skill_unhandled_rawnames:Dict[str,str] = data["UnhandledRawNames"]
-        with open('content/_buffs.json', 'r', encoding='utf-8') as f:
+        with open(buffs_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
             self._buff_name_2_detail:Dict[str,Dict]      = data["info"]
             self._buff_unhandled_code:Dict[str,str]      = data["UnhandledCode"]
@@ -570,6 +616,7 @@ class CombatLogAnalyzer:
             for key, item in self._buff_name_2_detail.items():
                 self._buff_code_2_name[str(item.get("code",""))] = key
 
+    # WebSocket으로 분석된 데이터 전송
     async def send_data(self, websocket):
         def recursive_asdict(obj):
             if is_dataclass(obj) and not isinstance(obj, type):
@@ -602,12 +649,13 @@ class CombatLogAnalyzer:
                 "data": data
             }))
         except Exception as e:
-            print("Error sending WebSocket message:", repr(e))
+            pass
 
+    # 새로운 패킷 데이터로 통계 업데이트
     def update(self, entry):
         type = entry["type"]
 
-        if(type == 1):
+        if(type == 1):  # 공격 패킷
             uid = entry.get("user_id", 0)
             tid = entry.get("target_id", 0)
             flags = entry.get("flags", {})
@@ -647,7 +695,7 @@ class CombatLogAnalyzer:
                     uid, tid, skill, 
                     self._user_tmp_data[uid])
 
-        elif type == 2:
+        elif type == 2:  # 스킬 사용 패킷
             uid = entry.get("user_id", 0)
             key1:str = str(entry.get("key1", "0"))
             key2:str = str(entry.get("key2", "0"))
@@ -657,13 +705,13 @@ class CombatLogAnalyzer:
             
             self._is_user_data_updated |= CombatLogAnalyzer._update_user_job(self._user_data.setdefault(uid, UserData()), skill_name)
 
-        elif type == 3:
+        elif type == 3:  # HP 변화 패킷
             self._raw_data[3] = entry
             hp = entry.get("prev_hp", 0)
             tid = entry.get("target_id", 0)
             CombatLogAnalyzer._update_enemy_data(self._enemy_data, tid, hp, 0)
             
-        elif type == 4:
+        elif type == 4:  # 자가 데미지 패킷
             uid = entry["user_id"]
             damage = entry["damage"]            
             if damage > 2095071572: return
@@ -676,7 +724,7 @@ class CombatLogAnalyzer:
                 self._max_self_damage_by_user.id = uid
                 self._max_self_damage_by_user.total_damage = self_damage.total_damage
 
-        elif type == 11 or type == 12:
+        elif type == 11 or type == 12:  # 버프 시작/업데이트 패킷
             buff_key = str(entry.get("buff_key",0))
             if buff_key not in self._buff_unhandled_code:
                 inst_key = entry.get("inst_key", "")
@@ -695,7 +743,7 @@ class CombatLogAnalyzer:
                         stack, 
                         self._buff_name_2_detail.get(buff_name)
                     )
-        elif type == 13:
+        elif type == 13:  # 버프 종료 패킷
             inst_key = entry.get("inst_key", "")
             uid = entry.get("user_id", 0)
             if uid in self._buff_by_user_by_inst and inst_key in self._buff_by_user_by_inst[uid]:
@@ -712,6 +760,7 @@ class CombatLogAnalyzer:
                 )
         pass
     
+    # 적 데이터 업데이트
     @staticmethod
     def _update_enemy_data(cc:EnemyData, tid:int, prev_hp:int = 0, total_damage:int = 0):
         if cc.max_hp < prev_hp:
@@ -722,6 +771,7 @@ class CombatLogAnalyzer:
             cc.most_attacked_tid = tid
         cc.last_attacked_tid = tid
 
+    # 타격 시간 기록
     @staticmethod
     def _update_hit_time(cc, tid):
         td = cc.setdefault(tid, {"start":0, "end":0})
@@ -730,6 +780,7 @@ class CombatLogAnalyzer:
             td["start"] = t
         td["end"] = t
 
+    # 전투 데이터 업데이트
     @staticmethod
     def _update_combat(cc:DamageContainer, uid:int, tid:int, damage:int, flags, skill:str, utdata:UserTmpData):
         if damage <= 0: return
@@ -763,10 +814,12 @@ class CombatLogAnalyzer:
             else:
                 CombatLogAnalyzer._update_damage_data(c.normal, damage, flags)
         
+    # 데미지 컨테이너 가져오기 (없으면 생성)
     @staticmethod
     def _get_damage_container(container:DamageContainer, uid: int, tid: int, skill: str) -> CombatDetailData:
         return container.setdefault(uid, {}).setdefault(tid, {}).setdefault(skill, CombatDetailData())
     
+    # 데미지 데이터 업데이트
     @staticmethod
     def _update_damage_data(c:DamageData, damage, flags):
         is_crit      = flags.get("crit_flag") == 1
@@ -786,12 +839,14 @@ class CombatLogAnalyzer:
         else:
             c.min_damage = min(c.min_damage, damage)
 
+    # 버프 영향 데이터 업데이트
     @staticmethod
     def _update_buff_impact_data(c:BuffImpactData, utd:UserTmpData):
         c.total_count    += 1
         c.total_atk      += utd.atk_buff
         c.total_dmg      += utd.dmg_buff
 
+    # 버프 지속시간 업데이트
     @staticmethod
     def _update_buff_uptime(cc:BuffUptimeContainer, uid, tid, skill, tmpdata: UserTmpData):
         gc = CombatLogAnalyzer._get_buff_uptime_container
@@ -799,16 +854,19 @@ class CombatLogAnalyzer:
             for c in [gc(cc,uid,0,"",buff_name), gc(cc,uid,tid,"",buff_name), gc(cc,uid,0,skill,buff_name), gc(cc,uid,tid,skill,buff_name)]:
                 CombatLogAnalyzer._update_buff_uptime_data(c, buff_stack)
 
+    # 버프 지속시간 컨테이너 가져오기
     @staticmethod
     def _get_buff_uptime_container(container:BuffUptimeContainer, uid: int, tid: int, skill: str, buff: str) -> BuffUptimeData:
         return container.setdefault(uid, {}).setdefault(tid, {}).setdefault(skill, {}).setdefault(buff, BuffUptimeData())
     
+    # 버프 지속시간 데이터 업데이트
     @staticmethod
     def _update_buff_uptime_data(c:BuffUptimeData, inst:BuffInstData):
         c.max_stack = max(c.max_stack, inst.buff_stack)
         c.total_stack += inst.buff_stack
         c.type = inst.buff_type
         
+    # 유저 버프 상태 업데이트
     @staticmethod
     def _update_user_buff(cc:BuffInstContainer, utdc:UserTmpDataContainer, uid:int, tid:int, inst_key:str, buff_name:str, stack:int, buff_detail:Any):
         data       = cc.setdefault(uid, {}).setdefault(inst_key, BuffInstData())
@@ -832,6 +890,7 @@ class CombatLogAnalyzer:
             if buff_name in user_data.buff:
                 del user_data.buff[buff_name]
     
+    # 스킬 이름으로 유저 직업 판별
     @staticmethod
     def _update_user_job(user:UserData, raw_sname:str) -> bool:
         if user.job != "": return False
@@ -871,6 +930,7 @@ class CombatLogAnalyzer:
 
         return user.job != ""
     
+    # 스킬 키 생성 (코드를 이름으로 변환)
     @staticmethod
     def _get_skill_key(key2name, key1:str, key2:str, is_dot:bool, flags:Dict):
         skey = None
@@ -888,10 +948,12 @@ class CombatLogAnalyzer:
             skey = " ".join(keyparts)
         return skey
     
+    # 도트 데미지 여부 확인
     @staticmethod
     def _is_dot(flags):
         return (flags.get("dot_flag") and flags.get("dot_flag2") and flags.get("dot_flag3")) or flags.get("dot_flag4")
     
+    # 특수 공격 여부 확인
     @staticmethod
     def _is_special(flags):
         return (flags.get("dot_flag") or flags.get("dot_flag2") or flags.get("dot_flag3"))
@@ -899,20 +961,63 @@ class CombatLogAnalyzer:
 
 
 
-
+# 메인 함수 - WebSocket 서버 시작
 async def main() -> None:
+    print("\n" + "="*70)
+    print("  🚀 Mobi-Meter 데미지 미터 서버 시작중...")
+    print("="*70)
+    
     async def wsserve(websocket) -> None:
+        client_ip = websocket.remote_address[0]
+        print(f"  ✅ 클라이언트 연결됨: {client_ip}")
         streamer = PacketStreamer()
         await streamer.stream(websocket)
+        
     async with serve(wsserve, '0.0.0.0', PORT, max_size=10_000_000):
-        print(f"WebSocket server started on ws://0.0.0.0:{PORT}")
+        print(f"  ✅ WebSocket 서버 시작 완료!")
+        print(f"  📡 포트: {PORT}")
+        print(f"  🌐 브라우저에서 index.html을 열어주세요")
+        print(f"  📊 실시간 데미지 측정 대기중...")
+        print(f"  ⚠️  관리자 권한으로 실행되었는지 확인하세요")
+        print("="*70 + "\n")
         await asyncio.Future()  # run forever
 
+# 프로그램 진입점
 if __name__ == '__main__':
-    with open('content/settings.json', 'r', encoding='utf-8') as f:
-        data = json.load(f)
-        DEBUG   = data["Debug"]
-        PORT    = data["Port"]
-        IFACE    = data["Iface"]
-        if IFACE == "None": IFACE = None
+    import sys
+    import os
+    
+    # exe 실행시 실행 파일이 있는 디렉토리에서 settings.json 찾기
+    if getattr(sys, 'frozen', False):
+        # PyInstaller로 빌드된 exe 실행시
+        base_path = sys._MEIPASS  # 임시 폴더에 압축 해제된 파일들의 경로
+        print(f"  📁 EXE 모드: 데이터 경로 = {base_path}")
+    else:
+        # 일반 Python 스크립트 실행시
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        print(f"  📁 스크립트 모드: 데이터 경로 = {base_path}")
+    
+    settings_path = os.path.join(base_path, 'settings.json')
+    print(f"  📄 설정 파일 경로: {settings_path}")
+    
+    try:
+        with open(settings_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            DEBUG   = data["Debug"]
+            PORT    = data["Port"]
+            IFACE    = data["Iface"]
+            if IFACE == "None": IFACE = None
+            print(f"  ✅ 설정 파일 로드 성공")
+    except FileNotFoundError:
+        print(f"  ❌ 설정 파일을 찾을 수 없습니다: {settings_path}")
+        print(f"  ℹ️  기본값 사용: PORT=8080, DEBUG=False")
+        DEBUG = False
+        PORT = 8080
+        IFACE = None
+    except Exception as e:
+        print(f"  ❌ 설정 파일 로드 실패: {e}")
+        DEBUG = False
+        PORT = 8080
+        IFACE = None
+    
     asyncio.run(main())
