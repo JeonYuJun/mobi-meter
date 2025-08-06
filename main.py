@@ -551,7 +551,15 @@ class PacketStreamer:
         while True:
             try:
                 await self.analyzer.send_data(websocket)
-                await asyncio.sleep(0.5)
+                
+                # 전투 상태에 따라 전송 주기 조절
+                if self.analyzer._data_changed:
+                    # 데이터 변경 시 빠른 업데이트
+                    await asyncio.sleep(0.3)
+                else:
+                    # 변경 없을 때 느린 업데이트
+                    await asyncio.sleep(1.5)
+                    
             except asyncio.CancelledError as e:
                 logger.log("데이터 전송 취소됨", "INFO")
                 break
@@ -685,6 +693,12 @@ class CombatLogAnalyzer:
 
         self._self_damage_by_user: DefaultDict[int, SimpleDamageData] = defaultdict(SimpleDamageData)
         self._max_self_damage_by_user: SimpleDamageData = SimpleDamageData()
+        
+        # 성능 최적화를 위한 캐시
+        self._last_sent_data_hash = None  # 마지막 전송 데이터 해시
+        self._data_changed = True  # 데이터 변경 플래그
+        self._cached_json_data = {}  # JSON 캐시
+        self._last_combat_time = time.time()  # 마지막 전투 시간
 
         # 스킬 및 버프 데이터 파일 로드
         import sys
@@ -744,44 +758,75 @@ class CombatLogAnalyzer:
             except Exception as e:
                 logger.log(f"메모리 정리 오류: {e}", "ERROR")
     
-    # WebSocket으로 분석된 데이터 전송
+    # WebSocket으로 분석된 데이터 전송 (성능 최적화)
     async def send_data(self, websocket):
-        def recursive_asdict(obj):
-            if is_dataclass(obj) and not isinstance(obj, type):
-                return {k: recursive_asdict(v) for k, v in asdict(obj).items()}
-            elif isinstance(obj, dict):
-                return {str(k): recursive_asdict(v) for k, v in obj.items()}
+        # 데이터 변경이 없으면 전송 건너뛰기
+        if not self._data_changed:
+            return
+        
+        # 전투 중인지 확인 (마지막 데이터로부터 10초 이내)
+        is_combat_active = (time.time() - self._last_combat_time) < 10
+        
+        # 캐싱된 JSON 데이터가 없거나 전투 중일 때만 새로 생성
+        if is_combat_active or not self._cached_json_data:
+            # 필요한 경우에만 recursive_asdict 수행
+            def recursive_asdict(obj):
+                if is_dataclass(obj) and not isinstance(obj, type):
+                    return {k: recursive_asdict(v) for k, v in asdict(obj).items()}
+                elif isinstance(obj, dict):
+                    return {str(k): recursive_asdict(v) for k, v in obj.items()}
+                else:
+                    return obj
+            
+            data = {
+                "self_id": self._max_self_damage_by_user.id,
+                "enemy": {
+                    "max_hp_tid": self._enemy_data.max_hp_tid,
+                    "most_attacked_tid": self._enemy_data.most_attacked_tid,
+                    "last_attacked_tid": self._enemy_data.last_attacked_tid,
+                },
+                "damage":recursive_asdict(self._damage_by_user_by_target_by_skill),
+                "damage2":recursive_asdict(self._self_damage_by_user_by_target_by_skill),
+                "buff":recursive_asdict(self._buff_uptime_by_user_by_target_by_skill),
+                "hit_time":recursive_asdict(self._time_data),
+            }
+            
+            if self._is_user_data_updated:
+                self._is_user_data_updated = False
+                data["user"] = recursive_asdict(self._user_data)
+            if DEBUG:
+                data["user_tmp"] = recursive_asdict(self._user_tmp_data)
+            
+            # 데이터 해시 계산하여 변경 확인
+            import hashlib
+            data_str = json.dumps(data, sort_keys=True)
+            data_hash = hashlib.md5(data_str.encode()).hexdigest()
+            
+            # 데이터가 실제로 변경되었을 때만 전송
+            if data_hash != self._last_sent_data_hash:
+                self._last_sent_data_hash = data_hash
+                self._cached_json_data = data
             else:
-                return obj
-        data = {
-            "self_id": self._max_self_damage_by_user.id,
-            "enemy": {
-                "max_hp_tid": self._enemy_data.max_hp_tid,
-                "most_attacked_tid": self._enemy_data.most_attacked_tid,
-                "last_attacked_tid": self._enemy_data.last_attacked_tid,
-            },
-            "damage":recursive_asdict(self._damage_by_user_by_target_by_skill),
-            "damage2":recursive_asdict(self._self_damage_by_user_by_target_by_skill),
-            "buff":recursive_asdict(self._buff_uptime_by_user_by_target_by_skill),
-            "hit_time":recursive_asdict(self._time_data),
-        }
-        if self._is_user_data_updated:
-            self._is_user_data_updated = False
-            data["user"] = recursive_asdict(self._user_data)
-        if DEBUG:
-            data["user_tmp"] = recursive_asdict(self._user_tmp_data)
-
+                # 변경 없으면 전송 건너뛰기
+                self._data_changed = False
+                return
+        
         try:
             await websocket.send(json.dumps({
                 "type": "damage",
-                "data": data
+                "data": self._cached_json_data
             }))
+            self._data_changed = False  # 전송 후 플래그 리셋
         except Exception as e:
             logger.log(f"데이터 전송 오류: {e}", "ERROR")
 
     # 새로운 패킷 데이터로 통계 업데이트
     def update(self, entry):
         type = entry["type"]
+        
+        # 데이터 변경 표시 및 전투 시간 업데이트
+        self._data_changed = True
+        self._last_combat_time = time.time()
 
         if(type == 1):  # 공격 패킷
             uid = entry.get("user_id", 0)
