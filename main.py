@@ -2,6 +2,9 @@
 import asyncio
 import json
 import brotli
+import time
+import webbrowser
+from datetime import datetime
 from functools import lru_cache
 from websockets import serve
 from scapy.all import AsyncSniffer, Packet, Raw
@@ -11,6 +14,56 @@ from scapy.layers.inet import TCP
 DEBUG = False  # 디버그 모드
 PORT = 8080    # WebSocket 서버 포트
 IFACE = None   # 네트워크 인터페이스
+CONNECTED_CLIENTS = set()  # 연결된 클라이언트 추적
+LAST_CONNECTION_TIME = time.time()  # 마지막 연결 시간
+
+# 시스템 상수 정의
+class SystemConstants:
+    # 게임 프로토콜 상수 (변경 금지)
+    ATTACK_PACKET_SIZE = 35
+    SKILL_PACKET_SIZE = 53
+    BUFF_END_PACKET_SIZE = 16
+    
+    # 시스템 설정 상수
+    MAX_DAMAGE_THRESHOLD = 2095071572  # 게임 내 최대 데미지
+    BUFFER_SIZE = 16384  # 16KB 버퍼
+    TCP_WINDOW = 10000  # TCP 재정렬 허용 범위
+    MAX_TCP_SEGMENTS = 500  # 최대 TCP 세그먼트 수
+    
+    # 정리 주기
+    CLEANUP_INTERVAL = 300  # 5분마다 메모리 정리
+    DATA_RETENTION = 1800  # 30분 이상 된 데이터 삭제
+    STATUS_INTERVAL = 60  # 1분마다 상태 출력
+    AUTO_SHUTDOWN_DELAY = 30  # 연결이 없을 때 30초 후 자동 종료
+
+# 간단한 로거
+class SimpleLogger:
+    def __init__(self, debug=False):
+        self.debug = debug
+        self.error_count = {}
+        
+    def log(self, message, level="INFO"):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        log_msg = f"[{timestamp}] {level}: {message}"
+        
+        if level == "ERROR" or self.debug:
+            print(log_msg)
+            
+        # 에러는 파일로도 저장
+        if level == "ERROR":
+            try:
+                with open("error.log", "a", encoding='utf-8') as f:
+                    f.write(log_msg + "\n")
+            except:
+                pass
+                
+    def count_error(self, error_type):
+        self.error_count[error_type] = self.error_count.get(error_type, 0) + 1
+        if self.error_count[error_type] % 10 == 0:
+            self.log(f"{error_type} 오류 {self.error_count[error_type]}회 발생", "ERROR")
+
+# 로거는 나중에 초기화 (DEBUG 값이 설정된 후)
+logger = None
 
 # 공격 플래그 비트 정의 (각 플래그가 어떤 공격 타입인지 나타냄)
 FLAG_BITS = (
@@ -75,7 +128,7 @@ def extract_flags(flags: bytes) -> dict:
 
 # 공격 패킷 파싱 (타입 10308)
 def parse_attack(data):
-    if len(data) != 35:
+    if len(data) != SystemConstants.ATTACK_PACKET_SIZE:
         return ""
 
     pivot = 0
@@ -149,7 +202,7 @@ def parse_hp_changed(data):
 
 # 자가 데미지 패킷 파싱 (타입 10719)
 def parse_self_damage(data):
-    if len(data) != 53:
+    if len(data) != SystemConstants.SKILL_PACKET_SIZE:
         return ""
 
     pivot = 0
@@ -342,17 +395,41 @@ class PacketStreamer:
         self.current_seq = None
         self.analyzer = CombatLogAnalyzer()
 
+    # 상태 모니터링
+    async def print_status(self):
+        """주기적으로 시스템 상태 출력"""
+        while True:
+            try:
+                await asyncio.sleep(SystemConstants.STATUS_INTERVAL)  # 1분마다
+                user_count = len(self.analyzer._user_data)
+                segment_count = len(self.tcp_segments)
+                buffer_size = len(self.buffer)
+                
+                print(f"\n[상태] 유저: {user_count} | TCP세그먼트: {segment_count} | 버퍼: {buffer_size}B")
+                
+                # 에러 통계가 있으면 출력
+                if logger.error_count:
+                    print(f"[에러] {dict(logger.error_count)}")
+                    
+            except Exception as e:
+                logger.log(f"상태 출력 오류: {e}", "ERROR")
+    
     # WebSocket 클라이언트에게 데이터 스트리밍
     async def stream(self, websocket) -> None:
         self.sniffer.start()
         consumer_task = asyncio.create_task(self._process(websocket))
         consumer_task2 = asyncio.create_task(self._process2(websocket))
+        status_task = asyncio.create_task(self.print_status())
+        cleanup_task = asyncio.create_task(self.analyzer.cleanup_old_data())
         try:
             await websocket.wait_closed()
         finally:
             consumer_task.cancel()
             consumer_task2.cancel()
+            status_task.cancel()
+            cleanup_task.cancel()
             self.sniffer.stop()
+            logger.log("스트리밍 종료", "INFO")
             self.sniffer.join()
 
     def _enqueue_packet(self, pkt: Packet) -> None:
@@ -400,7 +477,9 @@ class PacketStreamer:
                         content = parse_func(content)
                         res.append(content)
                 except Exception as e:
-                    pass
+                    logger.count_error(f"packet_parse_{packet_type}")
+                    if DEBUG:
+                        logger.log(f"패킷 파싱 오류 (타입 {packet_type}): {e}", "ERROR")
 
                 pivot += 9 + length
 
@@ -412,7 +491,7 @@ class PacketStreamer:
             try:
                 pkt: Packet = await self.queue.get()
             except asyncio.CancelledError as e:
-                pass
+                logger.log("패킷 처리 취소됨", "INFO")
                 break
 
             if pkt.haslayer(Raw):
@@ -422,11 +501,19 @@ class PacketStreamer:
                 if self.current_seq is None:
                     self.current_seq = seq
 
-                if abs(seq_distance(seq,self.current_seq)) > 10000:
+                if abs(seq_distance(seq,self.current_seq)) > SystemConstants.TCP_WINDOW:
                     self.tcp_segments.clear()
                     self.current_seq = None
                     self.buffer = b''
                     continue
+                    
+                # TCP 세그먼트 수 제한
+                if len(self.tcp_segments) > SystemConstants.MAX_TCP_SEGMENTS:
+                    # 오래된 세그먼트 절반 삭제
+                    sorted_seqs = sorted(self.tcp_segments.keys())
+                    for seq in sorted_seqs[:len(sorted_seqs)//2]:
+                        del self.tcp_segments[seq]
+                    logger.log(f"TCP 세그먼트 정리: {len(sorted_seqs)} -> {len(self.tcp_segments)}", "INFO")
                     
                 if seq not in self.tcp_segments or self.tcp_segments[seq] != payload:
                     self.tcp_segments[seq] = payload
@@ -440,8 +527,11 @@ class PacketStreamer:
                     self.buffer += segment
                     self.current_seq = (self.current_seq + len(segment)) % SEQ_MOD
 
-                if len(self.buffer) > 1024 * 4 * 4:
+                if len(self.buffer) > SystemConstants.BUFFER_SIZE:
+                    # 버퍼가 너무 크면 절반 정리
                     self.buffer = self.buffer[len(self.buffer)//2:]
+                    if DEBUG:
+                        logger.log(f"버퍼 정리: {SystemConstants.BUFFER_SIZE} bytes 초과", "INFO")
 
                 parsed, pivot = self._packet_parser(self.buffer)
                 self.buffer = self.buffer[pivot:]
@@ -451,8 +541,10 @@ class PacketStreamer:
                         for entry in parsed:
                             self.analyzer.update(entry)
                     except Exception as e:
-                        pass
-                        break
+                        logger.log(f"데이터 분석 오류: {e}", "ERROR")
+                        if DEBUG:
+                            break
+                        # 디버그 모드가 아니면 계속 실행
 
     # 분석된 데이터를 주기적으로 WebSocket으로 전송
     async def _process2(self, websocket) -> None:
@@ -460,8 +552,12 @@ class PacketStreamer:
             try:
                 await self.analyzer.send_data(websocket)
                 await asyncio.sleep(0.5)
-            except asyncio.CancelledError as e:            
+            except asyncio.CancelledError as e:
+                logger.log("데이터 전송 취소됨", "INFO")
                 break
+            except Exception as e:
+                logger.log(f"WebSocket 전송 오류: {e}", "ERROR")
+                await asyncio.sleep(1)  # 에러 발생시 잠시 대기 후 재시도
 
 # 데이터 분석 관련 임포트
 import time
@@ -616,6 +712,38 @@ class CombatLogAnalyzer:
             for key, item in self._buff_name_2_detail.items():
                 self._buff_code_2_name[str(item.get("code",""))] = key
 
+    # 오래된 데이터 정리
+    async def cleanup_old_data(self):
+        """30분 이상 된 데이터를 자동으로 정리"""
+        while True:
+            try:
+                await asyncio.sleep(SystemConstants.CLEANUP_INTERVAL)  # 5분마다
+                current_time = time.time()
+                cleaned_count = 0
+                
+                # 시간 데이터 정리
+                for uid in list(self._time_data.keys()):
+                    if uid in self._time_data:
+                        end_time = self._time_data[uid].get('end', 0)
+                        if current_time - end_time > SystemConstants.DATA_RETENTION:
+                            # 관련 데이터 모두 삭제
+                            del self._time_data[uid]
+                            if uid in self._damage_by_user_by_target_by_skill:
+                                del self._damage_by_user_by_target_by_skill[uid]
+                            if uid in self._self_damage_by_user_by_target_by_skill:
+                                del self._self_damage_by_user_by_target_by_skill[uid]
+                            if uid in self._buff_uptime_by_user_by_target_by_skill:
+                                del self._buff_uptime_by_user_by_target_by_skill[uid]
+                            if uid in self._user_data:
+                                del self._user_data[uid]
+                            cleaned_count += 1
+                
+                if cleaned_count > 0:
+                    logger.log(f"메모리 정리: {cleaned_count}명의 오래된 데이터 삭제", "INFO")
+                    
+            except Exception as e:
+                logger.log(f"메모리 정리 오류: {e}", "ERROR")
+    
     # WebSocket으로 분석된 데이터 전송
     async def send_data(self, websocket):
         def recursive_asdict(obj):
@@ -649,7 +777,7 @@ class CombatLogAnalyzer:
                 "data": data
             }))
         except Exception as e:
-            pass
+            logger.log(f"데이터 전송 오류: {e}", "ERROR")
 
     # 새로운 패킷 데이터로 통계 업데이트
     def update(self, entry):
@@ -714,7 +842,9 @@ class CombatLogAnalyzer:
         elif type == 4:  # 자가 데미지 패킷
             uid = entry["user_id"]
             damage = entry["damage"]            
-            if damage > 2095071572: return
+            if damage > SystemConstants.MAX_DAMAGE_THRESHOLD: 
+                logger.log(f"비정상 데미지 감지: {damage}", "INFO")
+                return
     
             self._raw_data[4] = entry
 
@@ -963,24 +1093,125 @@ class CombatLogAnalyzer:
 
 # 메인 함수 - WebSocket 서버 시작
 async def main() -> None:
+    global CONNECTED_CLIENTS, LAST_CONNECTION_TIME
+    
     print("\n" + "="*70)
-    print("  🚀 Mobi-Meter 데미지 미터 서버 시작중...")
+    print("  Mobi-Meter 데미지 미터 서버 시작중...")
+    print("="*70)
+    print(f"  [INFO] 종료하려면 Ctrl+C를 누르세요")
     print("="*70)
     
     async def wsserve(websocket) -> None:
+        global CONNECTED_CLIENTS, LAST_CONNECTION_TIME
         client_ip = websocket.remote_address[0]
-        print(f"  ✅ 클라이언트 연결됨: {client_ip}")
-        streamer = PacketStreamer()
-        await streamer.stream(websocket)
+        print(f"  [CONNECT] 클라이언트 연결됨: {client_ip}")
+        
+        # 클라이언트 추가
+        CONNECTED_CLIENTS.add(websocket)
+        LAST_CONNECTION_TIME = time.time()
+        print(f"  [INFO] 현재 연결된 클라이언트 수: {len(CONNECTED_CLIENTS)}")
+        
+        try:
+            streamer = PacketStreamer()
+            await streamer.stream(websocket)
+        finally:
+            # 클라이언트 제거
+            CONNECTED_CLIENTS.discard(websocket)
+            print(f"  [DISCONNECT] 클라이언트 연결 해제: {client_ip}")
+            print(f"  [INFO] 현재 연결된 클라이언트 수: {len(CONNECTED_CLIENTS)}")
+            
+            if len(CONNECTED_CLIENTS) == 0:
+                print(f"  [INFO] 모든 클라이언트가 연결 해제됨. {SystemConstants.AUTO_SHUTDOWN_DELAY}초 후 자동 종료...")
         
     async with serve(wsserve, '0.0.0.0', PORT, max_size=10_000_000):
-        print(f"  ✅ WebSocket 서버 시작 완료!")
-        print(f"  📡 포트: {PORT}")
-        print(f"  🌐 브라우저에서 index.html을 열어주세요")
-        print(f"  📊 실시간 데미지 측정 대기중...")
-        print(f"  ⚠️  관리자 권한으로 실행되었는지 확인하세요")
+        print(f"  [OK] WebSocket 서버 시작 완료!")
+        print(f"  [PORT] {PORT}")
+        print(f"  [STATUS] 실시간 데미지 측정 대기중...")
+        print(f"  [WARNING] 관리자 권한으로 실행되었는지 확인하세요")
+        print("="*70)
+        
+        # 브라우저 자동 열기 (로컬 HTML 파일)
+        print(f"  [BROWSER] 브라우저를 여는 중...")
+        try:
+            # exe 실행 시 index.html 경로 찾기
+            if getattr(sys, 'frozen', False):
+                # exe 모드: dist 폴더에서 실행되므로 상위 폴더의 index.html 열기
+                exe_dir = os.path.dirname(sys.executable)
+                parent_dir = os.path.dirname(exe_dir)  # dist의 상위 폴더 (mobi-meter)
+                html_path = os.path.join(parent_dir, 'index.html')
+            else:
+                # 스크립트 모드: 현재 디렉토리의 index.html
+                html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'index.html')
+            
+            # 파일 경로를 file:// URL로 변환
+            html_url = 'file:///' + html_path.replace('\\', '/')
+            webbrowser.open(html_url)
+            print(f"  [OK] 브라우저에서 대시보드를 열었습니다")
+            print(f"  [INFO] 열린 파일: {html_path}")
+        except Exception as e:
+            print(f"  [WARNING] 브라우저 자동 열기 실패: {e}")
+            print(f"  [INFO] 브라우저에서 직접 index.html 파일을 열어주세요")
+        
         print("="*70 + "\n")
-        await asyncio.Future()  # run forever
+        
+        # 자동 종료 체크 태스크
+        async def auto_shutdown_check():
+            global CONNECTED_CLIENTS, LAST_CONNECTION_TIME
+            while True:
+                await asyncio.sleep(5)  # 5초마다 체크
+                
+                if len(CONNECTED_CLIENTS) == 0:
+                    idle_time = time.time() - LAST_CONNECTION_TIME
+                    remaining = SystemConstants.AUTO_SHUTDOWN_DELAY - idle_time
+                    
+                    if remaining <= 0:
+                        print(f"\n[AUTO-SHUTDOWN] 연결된 클라이언트가 없어 프로그램을 종료합니다.")
+                        return  # 메인 함수 종료
+                    elif remaining <= 10:
+                        print(f"  [AUTO-SHUTDOWN] {int(remaining)}초 후 자동 종료...")
+        
+        # 자동 종료 체크 시작
+        shutdown_task = asyncio.create_task(auto_shutdown_check())
+        
+        try:
+            await shutdown_task  # 자동 종료 대기
+        except asyncio.CancelledError:
+            pass  # Ctrl+C로 취소됨
+
+# 자동 재시작 기능
+async def stable_main() -> None:
+    """오류 발생시 자동으로 재시작하는 안정적인 메인 함수"""
+    restart_count = 0
+    max_restarts = 3
+    
+    while restart_count < max_restarts:
+        try:
+            await main()
+            # main()이 정상 종료되면 (자동 종료 등) 프로그램 종료
+            print("\n[EXIT] 프로그램을 종료합니다.")
+            break
+        except KeyboardInterrupt:
+            print("\n\n사용자에 의해 중단됨")
+            break
+        except Exception as e:
+            restart_count += 1
+            error_msg = str(e)
+            logger.log(f"서버 오류 발생 (재시작 {restart_count}/{max_restarts}): {error_msg}", "ERROR")
+            
+            # 포트 충돌 오류 체크
+            if "10048" in error_msg or "bind" in error_msg:
+                print(f"\n[ERROR] 포트 {PORT}이(가) 이미 사용 중입니다!")
+                print(f"  [해결방법1] 기존 실행 중인 mobi-meter.exe를 종료하세요")
+                print(f"  [해결방법2] 작업 관리자에서 python.exe 또는 mobi-meter.exe 프로세스를 종료하세요")
+                print(f"  [해결방법3] settings.json에서 다른 포트 번호로 변경하세요")
+                break
+            
+            if restart_count < max_restarts:
+                print(f"\n[ERROR] 오류 발생! 5초 후 자동 재시작... ({restart_count}/{max_restarts})")
+                await asyncio.sleep(5)
+            else:
+                print(f"\n[ERROR] 재시작 한계 도달. 프로그램을 종료합니다.")
+                break
 
 # 프로그램 진입점
 if __name__ == '__main__':
@@ -991,14 +1222,14 @@ if __name__ == '__main__':
     if getattr(sys, 'frozen', False):
         # PyInstaller로 빌드된 exe 실행시
         base_path = sys._MEIPASS  # 임시 폴더에 압축 해제된 파일들의 경로
-        print(f"  📁 EXE 모드: 데이터 경로 = {base_path}")
+        print(f"  [EXE 모드] 데이터 경로 = {base_path}")
     else:
         # 일반 Python 스크립트 실행시
         base_path = os.path.dirname(os.path.abspath(__file__))
-        print(f"  📁 스크립트 모드: 데이터 경로 = {base_path}")
+        print(f"  [스크립트 모드] 데이터 경로 = {base_path}")
     
     settings_path = os.path.join(base_path, 'settings.json')
-    print(f"  📄 설정 파일 경로: {settings_path}")
+    print(f"  [설정 파일] 경로: {settings_path}")
     
     try:
         with open(settings_path, 'r', encoding='utf-8') as f:
@@ -1007,17 +1238,21 @@ if __name__ == '__main__':
             PORT    = data["Port"]
             IFACE    = data["Iface"]
             if IFACE == "None": IFACE = None
-            print(f"  ✅ 설정 파일 로드 성공")
+            print(f"  [OK] 설정 파일 로드 성공")
     except FileNotFoundError:
-        print(f"  ❌ 설정 파일을 찾을 수 없습니다: {settings_path}")
-        print(f"  ℹ️  기본값 사용: PORT=8080, DEBUG=False")
+        print(f"  [ERROR] 설정 파일을 찾을 수 없습니다: {settings_path}")
+        print(f"  [INFO] 기본값 사용: PORT=8080, DEBUG=False")
         DEBUG = False
         PORT = 8080
         IFACE = None
     except Exception as e:
-        print(f"  ❌ 설정 파일 로드 실패: {e}")
+        print(f"  [ERROR] 설정 파일 로드 실패: {e}")
         DEBUG = False
         PORT = 8080
         IFACE = None
     
-    asyncio.run(main())
+    # 로거 초기화
+    logger = SimpleLogger(DEBUG)
+    
+    # 안정적인 메인 함수 실행 (자동 재시작 포함)
+    asyncio.run(stable_main())
