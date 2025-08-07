@@ -6,7 +6,7 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-# dist/  # exe 파일 포함을 위해 주석 처리
+dist/
 downloads/
 eggs/
 .eggs/
@@ -50,7 +50,7 @@ settings.json
 CLAUDE.md
 
 # Executables
-# *.exe  # dist 폴더의 exe 파일 포함을 위해 주석 처리
+*.exe
 
 # Packet capture
 *.pcap
