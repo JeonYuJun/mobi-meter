@@ -801,6 +801,34 @@ input[type="checkbox"]:checked::after {
     font-size: 0.9em;
 }
 
+.skill-table .skill-header {
+    display: grid;
+    grid-template-columns: 1.5fr 1.2fr 0.8fr 0.8fr 0.8fr 0.8fr;
+    gap: 12px;
+    padding: 8px 16px;
+    align-items: center;
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--text-dim);
+    background: var(--bg-soft);
+    border-bottom: 2px solid var(--primary-color);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.skill-table .skill-header .skill-name {
+    text-align: left;
+}
+
+.skill-table .skill-header .skill-damage {
+    text-align: left;
+}
+
+.skill-table .skill-header .skill-stat {
+    text-align: center;
+    font-size: 0.8em;
+}
+
 .skill-table .skill-row {
     position: relative;
     display: grid;

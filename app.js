@@ -698,6 +698,19 @@ function renderSkillDetail(uid, container) {
     skillRows.sort((a, b) => b.dmg - a.dmg);
 
     let table = `<div class="skill-table">`;
+    
+    // 헤더 추가
+    table += `
+        <div class="skill-header">
+            <div class="skill-name">스킬명</div>
+            <div class="skill-damage">총 데미지</div>
+            <div class="skill-stat">평균 공증</div>
+            <div class="skill-stat">평균 피증</div>
+            <div class="skill-stat">치명타율</div>
+            <div class="skill-stat">추가타율</div>
+        </div>
+    `;
+    
     skillRows.forEach((row, idx) => {
         const percent = calcPercent(row.dmg, total);
         const id = `skill_${uid}_${row.skill.replace(/[^\w가-힣]/g, '_')}`;
