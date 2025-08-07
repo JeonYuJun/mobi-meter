@@ -488,7 +488,9 @@ function renderDetailBuffs(uid, container) {
     for (const [key, value] of Object.entries(buffs)) {
         const type = value.type;
         if (!buffsByType[type]) buffsByType[type] = [];
-        const uptime = calcPercent(value.total_stack/value.max_stack, db.normal.total_count + db.special.total_count);
+        // 가동률 = (total_stack / max_stack) / 총공격횟수
+        // total_stack은 버프가 켜진 상태에서 공격한 횟수 (스택 무관하게 1씩 증가)
+        const uptime = calcPercent(value.total_stack, db.normal.total_count + db.special.total_count);
         buffsByType[type].push({name: key, uptime, maxStack: value.max_stack, color: colors[type]});
     }
     
@@ -623,7 +625,7 @@ function renderDetail(uid) {
                 <div class="buff-item">
                     <div class="circle" style="background:#${colors[buffTypeCode]};""></div>
                     ${key}&nbsp;
-                    <span class="detail-value">(${calcPercent(value.total_stack/value.max_stack, db.normal.total_count + db.special.total_count)}% / ${value.max_stack})</span>
+                    <span class="detail-value">(${calcPercent(value.total_stack, db.normal.total_count + db.special.total_count)}% / ${value.max_stack})</span>
                 </div>`)
             .join("")
     }
@@ -676,7 +678,7 @@ function renderSkillDetail(uid, container) {
             const colors = {1:"E68A2E", 11:"2E7DD9", 12:"36CC6D", 21:"A05ED9", 31:"E65A9C"};
             
             for (const [buffName, buffData] of Object.entries(skillBuffs)) {
-                const uptime = calcPercent(buffData.total_stack/buffData.max_stack, normal.total_count + special.total_count);
+                const uptime = calcPercent(buffData.total_stack, normal.total_count + special.total_count);
                 if (uptime > 0) {
                     buffList.push({
                         name: buffName,

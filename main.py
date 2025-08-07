@@ -11,6 +11,7 @@ from scapy.all import AsyncSniffer, Packet, Raw
 from scapy.layers.inet import TCP
 from aiohttp import web
 import aiohttp_cors
+from version import __version__, __description__
 
 # 전역 설정 변수
 DEBUG = False  # 디버그 모드
@@ -44,19 +45,25 @@ class SimpleLogger:
     def __init__(self, debug=False):
         self.debug = debug
         self.error_count = {}
+        self.suppress_websocket_errors = True  # WebSocket 핸드셰이크 오류 억제
         
     def log(self, message, level="INFO"):
+        # WebSocket 핸드셰이크 오류는 무시
+        if self.suppress_websocket_errors and "handshake failed" in message:
+            return
+            
         timestamp = datetime.now().strftime("%H:%M:%S")
-        log_msg = f"[{timestamp}] {level}: {message}"
+        log_msg = f"[{timestamp}] {message}"
         
-        if level == "ERROR" or self.debug:
+        # 중요한 정보만 출력
+        if level in ["ERROR", "WARNING", "IMPORTANT"] or self.debug:
             print(log_msg)
             
         # 에러는 파일로도 저장
         if level == "ERROR":
             try:
                 with open("error.log", "a", encoding='utf-8') as f:
-                    f.write(log_msg + "\n")
+                    f.write(f"[{timestamp}] {message}\n")
             except:
                 pass
                 
@@ -617,7 +624,7 @@ class CombatDetailData:
 class BuffUptimeData:
     type: int = 0
     max_stack: int = 0
-    total_stack: int = 0
+    total_stack: int = 0  # 버프가 켜진 상태에서 공격한 횟수
 
 # 간단한 데미지 데이터 클래스
 @dataclass
@@ -1041,7 +1048,9 @@ class CombatLogAnalyzer:
     @staticmethod
     def _update_buff_uptime_data(c:BuffUptimeData, inst:BuffInstData):
         c.max_stack = max(c.max_stack, inst.buff_stack)
-        c.total_stack += inst.buff_stack
+        # 버프가 활성화되어 있을 때만 카운트 (스택 무관하게 1로 카운트)
+        if inst.buff_stack > 0:
+            c.total_stack += 1  # 버프 활성 시 1씩만 증가
         c.type = inst.buff_type
         
     # 유저 버프 상태 업데이트
@@ -1192,20 +1201,23 @@ async def main() -> None:
     global CONNECTED_CLIENTS, LAST_CONNECTION_TIME
     
     print("\n" + "="*70)
-    print("  Mobi-Meter 데미지 미터 서버 시작중...")
+    print(f"  Mobi-Meter v{__version__} - {__description__}")
     print("="*70)
-    print(f"  [INFO] 종료하려면 Ctrl+C를 누르세요")
+    print(f"  [서버] WebSocket: ws://localhost:{PORT}")
+    print(f"  [서버] HTTP: http://localhost:{HTTP_PORT}")
+    print(f"  [종료] Ctrl+C를 누르세요")
     print("="*70)
     
     async def wsserve(websocket) -> None:
         global CONNECTED_CLIENTS, LAST_CONNECTION_TIME
         client_ip = websocket.remote_address[0]
-        print(f"  [CONNECT] 클라이언트 연결됨: {client_ip}")
+        if DEBUG:
+            print(f"  [연결] 클라이언트: {client_ip}")
         
         # 클라이언트 추가
         CONNECTED_CLIENTS.add(websocket)
         LAST_CONNECTION_TIME = time.time()
-        print(f"  [INFO] 현재 연결된 클라이언트 수: {len(CONNECTED_CLIENTS)}")
+        print(f"  [연결] 현재 클라이언트: {len(CONNECTED_CLIENTS)}명")
         
         try:
             streamer = PacketStreamer()
@@ -1213,11 +1225,12 @@ async def main() -> None:
         finally:
             # 클라이언트 제거
             CONNECTED_CLIENTS.discard(websocket)
-            print(f"  [DISCONNECT] 클라이언트 연결 해제: {client_ip}")
-            print(f"  [INFO] 현재 연결된 클라이언트 수: {len(CONNECTED_CLIENTS)}")
+            if DEBUG:
+                print(f"  [해제] 클라이언트: {client_ip}")
+            print(f"  [연결] 현재 클라이언트: {len(CONNECTED_CLIENTS)}명")
             
             if len(CONNECTED_CLIENTS) == 0:
-                print(f"  [INFO] 모든 클라이언트가 연결 해제됨. {SystemConstants.AUTO_SHUTDOWN_DELAY}초 후 자동 종료...")
+                print(f"  [종료] {SystemConstants.AUTO_SHUTDOWN_DELAY}초 후 자동 종료...")
         
     # HTTP 서버 설정 및 시작
     app = web.Application()
@@ -1249,7 +1262,7 @@ async def main() -> None:
         print(f"  [OK] WebSocket 서버 시작 완료!")
         print(f"  [WEBSOCKET PORT] {PORT}")
         print(f"  [STATUS] 실시간 데미지 측정 대기중...")
-        print(f"  [WARNING] 관리자 권한으로 실행되었는지 확인하세요")
+        print(f"  [경고] 관리자 권한으로 실행하세요")
         print("="*70)
         
         # 브라우저 자동 열기 (HTTP 서버 URL)
@@ -1260,10 +1273,9 @@ async def main() -> None:
             webbrowser.open(http_url)
             print(f"  [OK] 브라우저에서 대시보드를 열었습니다")
             print(f"  [URL] {http_url}")
-            print(f"  [INFO] exe 파일 하나만으로 실행 가능합니다")
+            # exe 파일 안내 메시지 제거
         except Exception as e:
-            print(f"  [WARNING] 브라우저 자동 열기 실패: {e}")
-            print(f"  [INFO] 브라우저에서 {http_url} 을 열어주세요")
+            print(f"  [브라우저] 수동으로 {http_url} 열어주세요")
         
         print("="*70 + "\n")
         
@@ -1313,17 +1325,17 @@ async def stable_main() -> None:
             
             # 포트 충돌 오류 체크
             if "10048" in error_msg or "bind" in error_msg:
-                print(f"\n[ERROR] 포트 {PORT}이(가) 이미 사용 중입니다!")
+                print(f"\n[오류] 포트 {PORT}가 이미 사용 중입니다!")
                 print(f"  [해결방법1] 기존 실행 중인 mobi-meter.exe를 종료하세요")
                 print(f"  [해결방법2] 작업 관리자에서 python.exe 또는 mobi-meter.exe 프로세스를 종료하세요")
                 print(f"  [해결방법3] settings.json에서 다른 포트 번호로 변경하세요")
                 break
             
             if restart_count < max_restarts:
-                print(f"\n[ERROR] 오류 발생! 5초 후 자동 재시작... ({restart_count}/{max_restarts})")
+                print(f"\n[오류] 5초 후 재시작... ({restart_count}/{max_restarts})")
                 await asyncio.sleep(5)
             else:
-                print(f"\n[ERROR] 재시작 한계 도달. 프로그램을 종료합니다.")
+                print(f"\n[종료] 재시작 횟수 초과")
                 break
 
 # 프로그램 진입점
@@ -1353,13 +1365,14 @@ if __name__ == '__main__':
             if IFACE == "None": IFACE = None
             print(f"  [OK] 설정 파일 로드 성공")
     except FileNotFoundError:
-        print(f"  [ERROR] 설정 파일을 찾을 수 없습니다: {settings_path}")
-        print(f"  [INFO] 기본값 사용: PORT=8080, DEBUG=False")
+        if DEBUG:
+            print(f"  [설정] settings.json 없음 - 기본값 사용")
         DEBUG = False
         PORT = 8080
         IFACE = None
     except Exception as e:
-        print(f"  [ERROR] 설정 파일 로드 실패: {e}")
+        if DEBUG:
+            print(f"  [설정] 파일 로드 실패: {e}")
         DEBUG = False
         PORT = 8080
         IFACE = None
