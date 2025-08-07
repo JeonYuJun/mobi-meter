@@ -3,6 +3,8 @@ import asyncio
 import json
 import brotli
 import time
+import sys
+import struct
 import webbrowser
 from datetime import datetime
 from functools import lru_cache
@@ -13,7 +15,7 @@ from aiohttp import web
 import aiohttp_cors
 
 # 버전 정보
-__version__ = "1.0.2"
+__version__ = "1.0.7"
 __description__ = "Mabinogi Real-time Damage Meter"
 
 # 전역 설정 변수
@@ -388,8 +390,10 @@ parse_dict = {
     100085: parse_atk,
     100046: parse_buff,
     100049: parse_buff_update,
-    100047: parse_buff_end,
+    100047: parse_buff_end
     }
+
+# 패킷 분석 도구 함수들
 
 # TCP 시퀀스 번호 관련 상수 및 함수
 SEQ_MOD = 2**32
@@ -449,7 +453,9 @@ class PacketStreamer:
         self.loop.call_soon_threadsafe(self.queue.put_nowait, pkt)
 
     # 바이너리 데이터에서 게임 패킷 파싱
+    
     def _packet_parser(self, data: bytes) -> tuple[list,int]:
+        global DEBUG
         res = []
         pivot = 0
         buffer_size = len(data)
@@ -489,10 +495,15 @@ class PacketStreamer:
                         parse_func = parse_dict[data_type]
                         content = parse_func(content)
                         res.append(content)
+                    else:
+                        # 알려지지 않은 패킷 타입
+                        if DEBUG:
+                            logger.log(f"알려지지 않은 패킷 타입: {data_type}, 크기: {len(content)}", "INFO")
+                            
                 except Exception as e:
-                    logger.count_error(f"packet_parse_{packet_type}")
+                    logger.count_error(f"packet_parse_{data_type}")
                     if DEBUG:
-                        logger.log(f"패킷 파싱 오류 (타입 {packet_type}): {e}", "ERROR")
+                        logger.log(f"패킷 파싱 오류 (타입 {data_type}): {e}", "ERROR")
 
                 pivot += 9 + length
 
@@ -1362,11 +1373,12 @@ if __name__ == '__main__':
     try:
         with open(settings_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            DEBUG   = data["Debug"]
-            PORT    = data["Port"]
-            IFACE    = data["Iface"]
+            DEBUG   = data.get("Debug", False)
+            PORT    = data.get("Port", 8080)
+            IFACE    = data.get("Iface", None)
             if IFACE == "None": IFACE = None
             print(f"  [OK] 설정 파일 로드 성공")
+            print(f"  [설정] Debug={DEBUG}")
     except FileNotFoundError:
         if DEBUG:
             print(f"  [설정] settings.json 없음 - 기본값 사용")
