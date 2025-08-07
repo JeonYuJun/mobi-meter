@@ -45,6 +45,10 @@ settings.json
 *.tmp
 .cache/
 
+# PyInstaller
+*.spec
+admin.manifest
+
 # Claude Code settings
 .claude/
 CLAUDE.md

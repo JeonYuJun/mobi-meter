@@ -11,7 +11,10 @@ from scapy.all import AsyncSniffer, Packet, Raw
 from scapy.layers.inet import TCP
 from aiohttp import web
 import aiohttp_cors
-from version import __version__, __description__
+
+# 버전 정보
+__version__ = "1.0.2"
+__description__ = "Mabinogi Real-time Damage Meter"
 
 # 전역 설정 변수
 DEBUG = False  # 디버그 모드
