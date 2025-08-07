@@ -18,28 +18,28 @@
     <div class="container">
         <div class="panel">
             <div class="options-bar"> 
-                <div style="display: flex; gap: 6px; align-items: center;">
-                    <button class="btn tooltip" id="connectBtn">
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button class="btn btn-with-text" id="connectBtn">
                         <i class="fas fa-plug"></i>
+                        <span class="btn-text">연결</span>
                         <span id="connectSym" class="status-indicator"></span>
-                        <span class="tooltip-text">WebSocket 서버 연결</span>
                     </button>
-                    <button id="clearBtn" class="btn tooltip">
+                    <button id="clearBtn" class="btn btn-with-text">
                         <i class="fas fa-trash"></i>
-                        <span class="tooltip-text">데이터 초기화</span>
+                        <span class="btn-text">초기화</span>
                     </button>
-                    <button id="saveAllBtn" class="btn tooltip">
+                    <button id="saveAllBtn" class="btn btn-with-text">
                         <i class="fas fa-save"></i>
-                        <span class="tooltip-text">데이터 저장</span>
+                        <span class="btn-text">저장</span>
                     </button>
-                    <button id="loadAllBtn" class="btn tooltip">
+                    <button id="loadAllBtn" class="btn btn-with-text">
                         <i class="fas fa-folder-open"></i>
-                        <span class="tooltip-text">데이터 불러오기</span>
+                        <span class="btn-text">불러오기</span>
                     </button>
                     <div class="btn-group">
-                        <button id="exportBtn" class="btn tooltip">
+                        <button id="exportBtn" class="btn btn-with-text">
                             <i class="fas fa-file-export"></i>
-                            <span class="tooltip-text">내보내기</span>
+                            <span class="btn-text">내보내기</span>
                         </button>
                         <div id="exportMenu" class="dropdown-menu" style="display: none;">
                             <button class="dropdown-item" onclick="exportScreenshot()">
@@ -71,9 +71,9 @@
                     </label>
                 </div>
                 
-                <button id="settingsBtn" class="btn tooltip" style="margin-left: auto;">
+                <button id="settingsBtn" class="btn btn-with-text" style="margin-left: auto;">
                     <i class="fas fa-cog"></i>
-                    <span class="tooltip-text">설정</span>
+                    <span class="btn-text">설정</span>
                 </button>
             </div>
         </div>
@@ -199,10 +199,15 @@
             </div>
             <div class="setting-item">
                 <div class="setting-label">
-                    <span><i class="fas fa-bell"></i> 자동 초기화 알림</span>
+                    <span><i class="fas fa-bell"></i> 자동 초기화</span>
                     <div class="toggle-switch active" id="autoResetToggle"></div>
                 </div>
-                <p style="font-size: 0.85em; color: var(--text-dim); margin: 4px 0 0 0;">1분간 데이터 없을 시 알림을 표시합니다.</p>
+                <p style="font-size: 0.85em; color: var(--text-dim); margin: 4px 0 0 0;">설정 시간 동안 데이터가 없으면 자동으로 초기화합니다.</p>
+                <div style="margin-top: 10px; display: flex; align-items: center; gap: 10px;">
+                    <label style="font-size: 0.85em; color: var(--text-dim);">대기 시간:</label>
+                    <input type="number" id="autoResetTime" min="30" max="180" value="60" style="width: 60px; padding: 4px 8px; background: var(--bg-soft); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-color);">
+                    <span style="font-size: 0.85em; color: var(--text-dim);">초 (30~180)</span>
+                </div>
             </div>
             <div class="setting-item">
                 <div class="setting-label">
@@ -212,6 +217,7 @@
                     <option value="dark">다크 테마 (기본)</option>
                     <option value="soft-dark">소프트 다크</option>
                     <option value="high-contrast">고대비</option>
+                    <option value="minimal">미니멀 다크</option>
                 </select>
                 <p style="font-size: 0.85em; color: var(--text-dim); margin: 4px 0 0 0;">UI 색상 테마를 변경합니다.</p>
             </div>

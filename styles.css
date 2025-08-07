@@ -1,6 +1,6 @@
 /* ========== CSS 변수 정의 (테마 색상) ========== */
 :root {
-    /* Cyberpunk 테마 - 기본 색상 */
+    /* 다크 테마 - 기본 색상 (부드러운 톤) */
     --bg-color:         #0a0a0f;  /* Deep dark blue-black */
     --bg-soft:          #13131a;  /* Dark purple-grey */
     --bg-card:          #1a1a24;  /* Slightly lighter */
@@ -8,16 +8,16 @@
     --text-color:       #f0f0ff;  /* Slight blue tint */
     --text-dim:         #a8a8b8;
     --text-bright:      #ffffff;
-    --border-color:     rgba(138, 43, 226, 0.2);  /* Purple glow */
-    --border-hover:     rgba(138, 43, 226, 0.4);
+    --border-color:     rgba(123, 104, 238, 0.15);  /* Softer purple */
+    --border-hover:     rgba(123, 104, 238, 0.3);
     
-    /* 네온 악센트 색상 */
-    --primary-color:    #8B2BE2;  /* Electric purple */
-    --secondary-color:  #00D4FF;  /* Cyan */
-    --danger-color:     #FF0080;  /* Hot pink */
-    --success-color:    #00FF88;  /* Neon green */
-    --warning-color:    #FFB800;  /* Amber */
-    --info-color:       #B794F4;  /* Lavender */
+    /* 부드러운 악센트 색상 */
+    --primary-color:    #7B68EE;  /* Medium Slate Blue */
+    --secondary-color:  #4FC3F7;  /* Light Blue */
+    --danger-color:     #E91E63;  /* Pink */
+    --success-color:    #66BB6A;  /* Green */
+    --warning-color:    #FFA726;  /* Orange */
+    --info-color:       #AB47BC;  /* Purple */
     
     /* 그래프 및 차트 색상 */
     --chart-1:          #FF006E;
@@ -113,12 +113,12 @@ body {
 
 /* ========== 버튼 스타일 ========== */
 .btn {
-    padding: 6px 10px;
+    padding: 8px 12px;
     background: var(--btn-bg);
     color: var(--btn-text);
     border: 1px solid var(--btn-border);
     border-radius: 6px;
-    font-size: 0.85em;
+    font-size: 0.9em;
     font-weight: 500;
     cursor: pointer;
     transition: background 0.2s, color 0.2s, transform 0.1s;
@@ -131,6 +131,18 @@ body {
 
 .btn i {
     font-size: 1.1em;
+}
+
+/* 텍스트가 있는 버튼 스타일 */
+.btn-with-text {
+    padding: 10px 16px;
+    font-size: 0.95em;
+    gap: 8px;
+}
+
+.btn-with-text .btn-text {
+    font-weight: 500;
+    letter-spacing: 0.3px;
 }
 
 .btn:hover {
@@ -289,10 +301,10 @@ input[type="checkbox"]:checked::after {
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-bottom: 2px;
-    min-height: 40px;
+    margin-bottom: 8px;
+    min-height: 48px;
     flex-wrap: wrap;
-    padding: 4px 0;
+    padding: 8px 0;
 }
 
 .options-bar label {
@@ -977,33 +989,34 @@ input[type="checkbox"]:checked::after {
     visibility: hidden;
     background-color: rgba(0, 0, 0, 0.95);
     color: #fff;
-    text-align: left;
+    text-align: center;
     border-radius: 6px;
-    padding: 8px 12px;
+    padding: 10px 14px;
     position: absolute;
     z-index: 9999;
-    bottom: 125%;
+    top: calc(100% + 10px);
     left: 50%;
     transform: translateX(-50%);
-    white-space: normal;
-    font-size: 0.8em;
+    white-space: nowrap;
+    font-size: 0.85em;
     opacity: 0;
-    transition: opacity 0.3s;
-    border: 1px solid rgba(0, 217, 255, 0.3);
+    transition: opacity 0.3s, visibility 0.3s;
+    border: 1px solid var(--primary-color);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
     font-weight: normal;
     line-height: 1.4;
+    min-width: 120px;
 }
 
 .tooltip .tooltip-text::after {
     content: "";
     position: absolute;
-    top: 100%;
+    bottom: 100%;
     left: 50%;
     margin-left: -5px;
     border-width: 5px;
     border-style: solid;
-    border-color: rgba(0, 0, 0, 0.9) transparent transparent transparent;
+    border-color: transparent transparent rgba(0, 0, 0, 0.95) transparent;
 }
 
 .tooltip:hover .tooltip-text {
@@ -1165,6 +1178,26 @@ body[data-theme="minimal"] {
     --accent-gold:      #ffffff;
     --accent-silver:    #cccccc;
     --accent-bronze:    #999999;
+}
+
+/* 고대비 테마 */
+body[data-theme="high-contrast"] {
+    --bg-color:         #000000;
+    --bg-soft:          #0a0a0a;
+    --bg-card:          #141414;
+    --bg-hover:         #1f1f1f;
+    --text-color:       #ffffff;
+    --text-dim:         #b0b0b0;
+    --border-color:     rgba(255,255,255,0.3);
+    --primary-color:    #ffffff;
+    --secondary-color:  #e0e0e0;
+    --danger-color:     #ff6b6b;
+    --success-color:    #51cf66;
+    --warning-color:    #ffd93d;
+    --info-color:       #6bcfff;
+    --accent-gold:      #ffd700;
+    --accent-silver:    #c0c0c0;
+    --accent-bronze:    #cd7f32;
 }
 
 /* ========== 버튼 그룹 및 드롭다운 ========== */

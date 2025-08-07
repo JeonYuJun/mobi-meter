@@ -35,7 +35,7 @@ let viewMode = localStorage.getItem('viewMode') || 'card';  // 저장된 값 또
 // 자동 초기화 관련 변수
 let lastDataTime = Date.now();
 let autoResetInterval = null;
-let autoResetTimeout = 60000;    // 1분
+let autoResetTimeout = 60000;    // 기본 60초
 
 // ========== 차트 관련 함수 ==========
 // DPS 차트 초기화
@@ -1146,16 +1146,12 @@ function checkAutoReset() {
     const now = Date.now();
     const timeSinceLastData = now - lastDataTime;
     
-    // 1분 이상 데이터가 없고, 데이터가 있는 경우에만
+    // 설정된 시간 이상 데이터가 없고, 데이터가 있는 경우에만
     if (timeSinceLastData >= autoResetTimeout && getTotalDamage() > 0) {
-        // 자동 초기화 확인 대화상자
-        if (confirm('1분 이상 데이터 수집이 없었습니다.\n데이터를 초기화하시겠습니까?')) {
-            clearDB();
-            renderDamageRanks();
-        } else {
-            // 취소하면 타이머 재설정
-            lastDataTime = Date.now();
-        }
+        // 자동 초기화 실행 (알림 없이)
+        console.log(`자동 초기화: ${autoResetTimeout/1000}초 동안 데이터 없음`);
+        clearDB();
+        renderDamageRanks();
     }
 }
 
@@ -1613,14 +1609,33 @@ setInterval(() => {
         const chartEnabled = localStorage.getItem('chartEnabled') !== 'false';
         const animationEnabled = localStorage.getItem('animationEnabled') !== 'false';
         const autoResetEnabled = localStorage.getItem('autoResetEnabled') !== 'false';
+        const savedAutoResetTime = parseInt(localStorage.getItem('autoResetTime')) || 60;
         
         const chartToggle = document.getElementById('chartToggle');
         const animationToggle = document.getElementById('animationToggle');
         const autoResetToggle = document.getElementById('autoResetToggle');
+        const autoResetTimeInput = document.getElementById('autoResetTime');
         
         if (chartToggle) chartToggle.classList.toggle('active', chartEnabled);
         if (animationToggle) animationToggle.classList.toggle('active', animationEnabled);
         if (autoResetToggle) autoResetToggle.classList.toggle('active', autoResetEnabled);
+        
+        // 자동 초기화 시간 설정
+        if (autoResetTimeInput) {
+            autoResetTimeInput.value = savedAutoResetTime;
+            autoResetTimeout = savedAutoResetTime * 1000;
+            
+            // 시간 변경 이벤트
+            autoResetTimeInput.addEventListener('change', () => {
+                let value = parseInt(autoResetTimeInput.value);
+                if (value < 30) value = 30;
+                if (value > 180) value = 180;
+                autoResetTimeInput.value = value;
+                autoResetTimeout = value * 1000;
+                localStorage.setItem('autoResetTime', value);
+                console.log(`자동 초기화 시간 변경: ${value}초`);
+            });
+        }
         
         // 초기 상태 적용
         if (!chartEnabled && document.getElementById('chartPanel')) {
