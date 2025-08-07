@@ -9,10 +9,13 @@ from functools import lru_cache
 from websockets import serve
 from scapy.all import AsyncSniffer, Packet, Raw
 from scapy.layers.inet import TCP
+from aiohttp import web
+import aiohttp_cors
 
 # 전역 설정 변수
 DEBUG = False  # 디버그 모드
 PORT = 8080    # WebSocket 서버 포트
+HTTP_PORT = 8081  # HTTP 서버 포트 (리소스 서빙용)
 IFACE = None   # 네트워크 인터페이스
 CONNECTED_CLIENTS = set()  # 연결된 클라이언트 추적
 LAST_CONNECTION_TIME = time.time()  # 마지막 연결 시간
@@ -1136,7 +1139,55 @@ class CombatLogAnalyzer:
 
 
 
-# 메인 함수 - WebSocket 서버 시작
+# HTTP 서버 핸들러 - 리소스 파일 서빙
+async def handle_http_request(request):
+    """HTTP 요청을 처리하여 HTML/CSS/JS 파일 제공"""
+    import sys
+    import os
+    
+    # 요청 경로 가져오기
+    path = request.path
+    if path == '/':
+        path = '/index.html'
+    
+    # 허용된 파일만 서빙
+    allowed_files = {
+        '/index.html': 'text/html',
+        '/styles.css': 'text/css',
+        '/app.js': 'application/javascript'
+    }
+    
+    if path not in allowed_files:
+        return web.Response(text='Not Found', status=404)
+    
+    try:
+        # PyInstaller로 빌드된 경우 리소스 경로 찾기
+        if getattr(sys, 'frozen', False):
+            base_path = sys._MEIPASS
+        else:
+            base_path = os.path.dirname(os.path.abspath(__file__))
+        
+        file_path = os.path.join(base_path, path[1:])  # /를 제거
+        
+        # 파일 읽기
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # app.js의 WebSocket URL을 동적으로 수정
+        if path == '/app.js':
+            # localhost를 현재 호스트로 변경 (필요시)
+            content = content.replace('ws://localhost:8080', f'ws://localhost:{PORT}')
+        
+        return web.Response(
+            text=content,
+            content_type=allowed_files[path],
+            charset='utf-8'
+        )
+    except Exception as e:
+        logger.log(f"HTTP 서버 파일 읽기 오류: {e}", "ERROR")
+        return web.Response(text='Internal Server Error', status=500)
+
+# 메인 함수 - WebSocket 및 HTTP 서버 시작
 async def main() -> None:
     global CONNECTED_CLIENTS, LAST_CONNECTION_TIME
     
@@ -1168,34 +1219,51 @@ async def main() -> None:
             if len(CONNECTED_CLIENTS) == 0:
                 print(f"  [INFO] 모든 클라이언트가 연결 해제됨. {SystemConstants.AUTO_SHUTDOWN_DELAY}초 후 자동 종료...")
         
+    # HTTP 서버 설정 및 시작
+    app = web.Application()
+    app.router.add_get('/', handle_http_request)
+    app.router.add_get('/{path}', handle_http_request)
+    
+    # CORS 설정 (필요시)
+    cors = aiohttp_cors.setup(app, defaults={
+        "*": aiohttp_cors.ResourceOptions(
+            allow_credentials=True,
+            expose_headers="*",
+            allow_headers="*"
+        )
+    })
+    
+    for route in list(app.router.routes()):
+        cors.add(route)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', HTTP_PORT)
+    
+    # HTTP 서버 시작
+    await site.start()
+    print(f"  [OK] HTTP 서버 시작 완료!")
+    print(f"  [HTTP PORT] {HTTP_PORT}")
+    
     async with serve(wsserve, '0.0.0.0', PORT, max_size=10_000_000):
         print(f"  [OK] WebSocket 서버 시작 완료!")
-        print(f"  [PORT] {PORT}")
+        print(f"  [WEBSOCKET PORT] {PORT}")
         print(f"  [STATUS] 실시간 데미지 측정 대기중...")
         print(f"  [WARNING] 관리자 권한으로 실행되었는지 확인하세요")
         print("="*70)
         
-        # 브라우저 자동 열기 (로컬 HTML 파일)
+        # 브라우저 자동 열기 (HTTP 서버 URL)
         print(f"  [BROWSER] 브라우저를 여는 중...")
         try:
-            # exe 실행 시 index.html 경로 찾기
-            if getattr(sys, 'frozen', False):
-                # exe 모드: dist 폴더에서 실행되므로 상위 폴더의 index.html 열기
-                exe_dir = os.path.dirname(sys.executable)
-                parent_dir = os.path.dirname(exe_dir)  # dist의 상위 폴더 (mobi-meter)
-                html_path = os.path.join(parent_dir, 'index.html')
-            else:
-                # 스크립트 모드: 현재 디렉토리의 index.html
-                html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'index.html')
-            
-            # 파일 경로를 file:// URL로 변환
-            html_url = 'file:///' + html_path.replace('\\', '/')
-            webbrowser.open(html_url)
+            # HTTP 서버 URL로 브라우저 열기
+            http_url = f'http://localhost:{HTTP_PORT}'
+            webbrowser.open(http_url)
             print(f"  [OK] 브라우저에서 대시보드를 열었습니다")
-            print(f"  [INFO] 열린 파일: {html_path}")
+            print(f"  [URL] {http_url}")
+            print(f"  [INFO] exe 파일 하나만으로 실행 가능합니다")
         except Exception as e:
             print(f"  [WARNING] 브라우저 자동 열기 실패: {e}")
-            print(f"  [INFO] 브라우저에서 직접 index.html 파일을 열어주세요")
+            print(f"  [INFO] 브라우저에서 {http_url} 을 열어주세요")
         
         print("="*70 + "\n")
         

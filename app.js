@@ -30,7 +30,7 @@ let maxDataPoints = 120;         // 2분 데이터로 축소 (성능 개선)
 let chartInitialized = false;
 let chartUpdateTimeout = null;
 let isTabActive = true;
-let viewMode = 'card';           // 'card' or 'list'
+let viewMode = localStorage.getItem('viewMode') || 'card';  // 저장된 값 또는 기본값 'card'
 
 // 자동 초기화 관련 변수
 let lastDataTime = Date.now();
@@ -424,8 +424,11 @@ function showDetailModal(uid) {
                         skillDetailOpened[skillId] = true;
                         selectedDetailSkillName[uid] = detailRow.dataset.skill;
                     }
-                    renderDetailStats(uid, document.querySelector('.card-stats').parentElement);
-                    renderDetailBuffs(uid, document.querySelector('.buff-stats').parentElement);
+                    const statsParent = document.querySelector('.card-stats');
+                    if (statsParent) {
+                        renderDetailStats(uid, statsParent.parentElement);
+                    }
+                    // buff-stats 요소는 더 이상 사용하지 않으므로 제거
                 }
             });
         });
@@ -666,7 +669,26 @@ function renderSkillDetail(uid, container) {
                 atk: divideForDis(skillObj.buff.total_atk, skillObj.buff.total_count),
                 dmg: divideForDis(skillObj.buff.total_dmg, skillObj.buff.total_count),
             }
-            skillRows.push({ skill, dmg, detail, normal, dot, special });
+            
+            // 스킬별 버프 데이터 가져오기
+            const skillBuffs = buffDB[uid] && buffDB[uid][targetID] && buffDB[uid][targetID][skill] ? buffDB[uid][targetID][skill] : {};
+            const buffList = [];
+            const colors = {1:"E68A2E", 11:"2E7DD9", 12:"36CC6D", 21:"A05ED9", 31:"E65A9C"};
+            
+            for (const [buffName, buffData] of Object.entries(skillBuffs)) {
+                const uptime = calcPercent(buffData.total_stack/buffData.max_stack, normal.total_count + special.total_count);
+                if (uptime > 0) {
+                    buffList.push({
+                        name: buffName,
+                        uptime: uptime,
+                        color: colors[buffData.type] || "999999"
+                    });
+                }
+            }
+            // 가동률 높은 순으로 정렬
+            buffList.sort((a, b) => b.uptime - a.uptime);
+            
+            skillRows.push({ skill, dmg, detail, normal, dot, special, allBuffs: buffList });
             total += dmg;
         }
     }
@@ -679,6 +701,7 @@ function renderSkillDetail(uid, container) {
     skillRows.forEach((row, idx) => {
         const percent = calcPercent(row.dmg, total);
         const id = `skill_${uid}_${row.skill.replace(/[^\w가-힣]/g, '_')}`;
+        
         table += `
         <div class="skill-row" data-skill-id="${id}">
             <div class="bar-bg" style="width: ${percent}%;"></div>
@@ -689,7 +712,7 @@ function renderSkillDetail(uid, container) {
             <div class="skill-crit">${row.detail.crit}%</div>
             <div class="skill-addhit">${row.detail.addhit}%</div>
         </div>
-        <div id="${id}" data-skill="${row.skill}" class="skill-detail-row${skillDetailOpened[id] ? ' active' : ''}">
+        <div id="${id}" data-skill="${row.skill}" class="skill-detail-row${skillDetailOpened[id] ? ' active' : ''}" style="${row.allBuffs && row.allBuffs.length > 0 ? 'grid-template-columns: repeat(4, 1fr);' : ''}">
             <div>
                 <div>일반 데미지</div>
                 <div><span>타수</span><span>${row.normal.total_count.toLocaleString()}</span></div>
@@ -720,6 +743,21 @@ function renderSkillDetail(uid, container) {
                 <div><span>연타율</span><span>${calcPercent(row.special.fast_count,row.special.total_count)}%</span></div>
                 <div><span>치명타율</span><span>${calcPercent(row.special.crit_count,row.special.total_count)}%</span></div>
             </div>
+            ${row.allBuffs && row.allBuffs.length > 0 ? `
+            <div>
+                <div>버프 가동률</div>
+                ${row.allBuffs.slice(0, 7).map(buff => `
+                    <div>
+                        <span style="display: flex; align-items: center;">
+                            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #${buff.color}; margin-right: 6px;"></span>
+                            ${buff.name}
+                        </span>
+                        <span style="color: #${buff.color}; font-weight: 600;">${buff.uptime}%</span>
+                    </div>
+                `).join('')}
+                ${row.allBuffs.length > 7 ? `<div style="text-align: center; color: var(--text-dim); font-size: 0.9em; margin-top: 4px;">... 외 ${row.allBuffs.length - 7}개</div>` : ''}
+            </div>
+            ` : ''}
         </div>
         `;
     });
@@ -1563,9 +1601,13 @@ setInterval(() => {
         const animationEnabled = localStorage.getItem('animationEnabled') !== 'false';
         const autoResetEnabled = localStorage.getItem('autoResetEnabled') !== 'false';
         
-        document.getElementById('chartToggle').classList.toggle('active', chartEnabled);
-        document.getElementById('animationToggle').classList.toggle('active', animationEnabled);
-        document.getElementById('autoResetToggle').classList.toggle('active', autoResetEnabled);
+        const chartToggle = document.getElementById('chartToggle');
+        const animationToggle = document.getElementById('animationToggle');
+        const autoResetToggle = document.getElementById('autoResetToggle');
+        
+        if (chartToggle) chartToggle.classList.toggle('active', chartEnabled);
+        if (animationToggle) animationToggle.classList.toggle('active', animationEnabled);
+        if (autoResetToggle) autoResetToggle.classList.toggle('active', autoResetEnabled);
         
         // 초기 상태 적용
         if (!chartEnabled && document.getElementById('chartPanel')) {
@@ -1580,35 +1622,40 @@ setInterval(() => {
         }
         
         // ===== 테마 및 UI 설정 이벤트 =====
-        // 테마 변경
-        document.querySelectorAll('input[name="theme"]').forEach(radio => {
-            radio.addEventListener('change', () => {
-                if (radio.checked) {
-                    document.body.setAttribute('data-theme', radio.value);
-                    localStorage.setItem('theme', radio.value);
-                }
+        // 테마 변경 (select 요소 사용)
+        const themeSelect = document.getElementById('themeSelect');
+        if (themeSelect) {
+            themeSelect.addEventListener('change', () => {
+                const selectedTheme = themeSelect.value;
+                document.body.setAttribute('data-theme', selectedTheme);
+                localStorage.setItem('theme', selectedTheme);
             });
-        });
+        }
         
-        // 뷰 모드 변경
-        document.querySelectorAll('input[name="viewMode"]').forEach(radio => {
-            radio.addEventListener('change', () => {
-                if (radio.checked) {
-                    viewMode = radio.value;
-                    localStorage.setItem('viewMode', viewMode);
-                    renderDamageRanks();
-                }
+        // 뷰 모드 변경 (select 요소 사용)
+        const viewModeSelect = document.getElementById('viewModeSelect');
+        if (viewModeSelect) {
+            viewModeSelect.addEventListener('change', () => {
+                viewMode = viewModeSelect.value;
+                localStorage.setItem('viewMode', viewMode);
+                renderDamageRanks();
             });
-        });
+        }
         
         // 저장된 설정 복원
-        const savedTheme = localStorage.getItem('theme') || 'cyberpunk';
+        const savedTheme = localStorage.getItem('theme') || 'dark';
         const savedViewMode = localStorage.getItem('viewMode') || 'card';
         
-        document.querySelector(`input[name="theme"][value="${savedTheme}"]`).checked = true;
+        // 테마 설정 복원
+        if (themeSelect) {
+            themeSelect.value = savedTheme;
+        }
         document.body.setAttribute('data-theme', savedTheme);
         
-        document.querySelector(`input[name="viewMode"][value="${savedViewMode}"]`).checked = true;
+        // 뷰 모드 설정 복원
+        if (viewModeSelect) {
+            viewModeSelect.value = savedViewMode;
+        }
         viewMode = savedViewMode;
     }
     
@@ -1631,9 +1678,15 @@ setInterval(() => {
     });
     
     // 모달 닫기 버튼 이벤트
-    document.getElementById('modalClose').onclick = () => {
-        document.getElementById('detailModal').classList.remove('open');
-    };
+    const modalClose = document.getElementById('modalClose');
+    if (modalClose) {
+        modalClose.onclick = () => {
+            const detailModal = document.getElementById('detailModal');
+            if (detailModal) {
+                detailModal.classList.remove('open');
+            }
+        };
+    }
     
     // ESC 키로 모달 닫기
     document.addEventListener('keydown', (e) => {
@@ -1648,9 +1701,12 @@ setInterval(() => {
     
     // 전투 시간 업데이트
     setInterval(() => {
-        const elapsed = getRuntimeSec();
-        const minutes = Math.floor(elapsed / 60);
-        const seconds = Math.floor(elapsed % 60);
-        document.getElementById('combatTime').textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        const combatTimeElement = document.getElementById('combatTime');
+        if (combatTimeElement) {
+            const elapsed = getRuntimeSec();
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = Math.floor(elapsed % 60);
+            combatTimeElement.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
     }, 1000);
 })();

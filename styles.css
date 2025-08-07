@@ -853,6 +853,13 @@ input[type="checkbox"]:checked::after {
     color: var(--text-dim);
 }
 
+.skill-table .skill-buffs {
+    position: relative;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .skill-table .skill-detail-row {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -942,7 +949,7 @@ input[type="checkbox"]:checked::after {
     visibility: hidden;
     background-color: rgba(0, 0, 0, 0.95);
     color: #fff;
-    text-align: center;
+    text-align: left;
     border-radius: 6px;
     padding: 8px 12px;
     position: absolute;
@@ -950,13 +957,14 @@ input[type="checkbox"]:checked::after {
     bottom: 125%;
     left: 50%;
     transform: translateX(-50%);
-    white-space: nowrap;
+    white-space: normal;
     font-size: 0.8em;
     opacity: 0;
     transition: opacity 0.3s;
     border: 1px solid rgba(0, 217, 255, 0.3);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
     font-weight: normal;
+    line-height: 1.4;
 }
 
 .tooltip .tooltip-text::after {
