@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>모비미터 - Mobi Meter</title>
     <!-- Favicon -->
-    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
     <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Chart.js for graphs -->
@@ -38,23 +39,10 @@
                         <i class="fas fa-folder-open"></i>
                         <span class="btn-text">불러오기</span>
                     </button>
-                    <div class="btn-group">
-                        <button id="exportBtn" class="btn btn-with-text">
-                            <i class="fas fa-file-export"></i>
-                            <span class="btn-text">내보내기</span>
-                        </button>
-                        <div id="exportMenu" class="dropdown-menu" style="display: none;">
-                            <button class="dropdown-item" onclick="exportScreenshot()">
-                                <i class="fas fa-camera"></i> 스크린샷
-                            </button>
-                            <button class="dropdown-item" onclick="exportCSV()">
-                                <i class="fas fa-file-csv"></i> CSV 다운로드
-                            </button>
-                            <button class="dropdown-item" onclick="copyToClipboard()">
-                                <i class="fas fa-clipboard"></i> 클립보드 복사
-                            </button>
-                        </div>
-                    </div>
+                    <button id="exportBtn" class="btn btn-with-text">
+                        <i class="fas fa-file-export"></i>
+                        <span class="btn-text">내보내기</span>
+                    </button>
                 </div>
                 
                 <div style="display: flex; gap: 8px; align-items: center;">
@@ -85,19 +73,27 @@
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                 <h3 style="margin: 0; font-size: 1.1em; color: var(--text-color);">
                     <i class="fas fa-chart-area" style="color: var(--primary-color);"></i> 실시간 DPS 추이
-                </h3>
-                <div style="display: flex; gap: 6px; align-items: center;">
-                    <button class="btn tooltip" onclick="if(dpsChart) dpsChart.resetZoom();">
-                        <i class="fas fa-home"></i>
-                        <span class="tooltip-text">차트 위치 초기화</span>
-                    </button>
-                    <span style="font-size: 0.8em; color: var(--text-dim);">
-                        <i class="fas fa-info-circle"></i> 드래그: 좌우 이동
+                    <span id="zoomIndicator" style="display: none; font-size: 0.7em; color: var(--warning-color); margin-left: 10px;">
+                        <i class="fas fa-search-plus"></i> 확대됨
                     </span>
-                </div>
+                </h3>
+                <span style="font-size: 0.75em; color: var(--text-dim);">
+                    <i class="fas fa-mouse" style="font-size: 0.9em;"></i> 휠: 확대/축소
+                </span>
             </div>
             <div style="position: relative; height: 200px; background: var(--bg-soft); border-radius: 8px; padding: 10px;">
                 <canvas id="realtimeDPSChart" style="max-height: 180px;"></canvas>
+                <!-- 줌 리셋 버튼을 차트 내부 우측 상단에 배치 -->
+                <button class="btn tooltip" onclick="resetChartZoom()" 
+                    style="position: absolute; top: 15px; right: 15px; 
+                           background: rgba(255,255,255,0.1); 
+                           border: 1px solid rgba(255,255,255,0.2);
+                           padding: 6px 10px; font-size: 0.85em;
+                           backdrop-filter: blur(10px);
+                           transition: all 0.2s;">
+                    <i class="fas fa-compress" style="font-size: 0.9em;"></i>
+                    <span class="tooltip-text">줌 초기화</span>
+                </button>
             </div>
         </div>
         
@@ -133,7 +129,7 @@
                         <div class="my-text-box">평균 공증:<span class="detail-value">0%</span></div>
                         <div class="my-text-box">평균 피증:<span class="detail-value">0%</span></div>
                     </div>
-                    <div class="my-text-box" style="display: block; width: 100%;">
+                    <div class="my-text-box" style="display: block; width: 100%; height: auto; max-height: none; overflow: visible;">
                         <div id="buff-radio-groups" style="display: flex; align-items: center; gap:12px;">
                             <div class="btn">전체</div>
                             <div class="btn">룬</div>
@@ -143,10 +139,10 @@
                             <div class="btn">펫</div>
                             <div style="color: var(--text-dim)">(버프 가동률 / 최대 스택)</div>
                         </div>
-                        <div class="buff-list" style="display: flex; align-items: flex-start; flex-wrap: wrap; gap:12px; margin:20px 0px">
+                        <div class="buff-list" style="display: flex; align-items: flex-start; flex-wrap: wrap; gap:12px; margin:20px 0px; height: auto; overflow: visible;">
                             
                         </div>
-                        <div class="buff-list" style="display: flex; align-items: flex-start; gap:12px; margin-top:10px">
+                        <div class="buff-list" style="display: flex; align-items: flex-start; flex-wrap: wrap; gap:12px; margin-top:10px; height: auto; overflow: visible;">
                             
                         </div>
                     </div>
@@ -164,9 +160,19 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 class="modal-title" id="modalTitle">상세 정보</h2>
-                <button class="modal-close" onclick="document.getElementById('detailModal').classList.remove('open')">
-                    <i class="fas fa-xmark"></i>
-                </button>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button class="btn tooltip" onclick="exportModalScreenshot()" style="background: var(--bg-soft); border: 1px solid var(--border-color);">
+                        <i class="fas fa-download"></i>
+                        <span class="tooltip-text">이미지 다운로드</span>
+                    </button>
+                    <button class="btn tooltip" onclick="copyModalToClipboard()" style="background: var(--bg-soft); border: 1px solid var(--border-color);">
+                        <i class="fas fa-copy"></i>
+                        <span class="tooltip-text">이미지 복사</span>
+                    </button>
+                    <button class="modal-close" onclick="closeDetailModal()">
+                        <i class="fas fa-xmark"></i>
+                    </button>
+                </div>
             </div>
             <div class="modal-body" id="modalBody">
                 <!-- 동적으로 내용 추가 -->
@@ -213,15 +219,10 @@
             </div>
             <div class="setting-item">
                 <div class="setting-label">
-                    <span><i class="fas fa-palette"></i> 테마 선택</span>
+                    <span><i class="fas fa-moon"></i> 다크 모드</span>
+                    <div class="toggle-switch active" id="darkModeToggle"></div>
                 </div>
-                <select id="themeSelect" class="combobox" style="width: 100%; margin-top: 8px;">
-                    <option value="dark">다크 테마 (기본)</option>
-                    <option value="soft-dark">소프트 다크</option>
-                    <option value="high-contrast">고대비</option>
-                    <option value="minimal">미니멀 다크</option>
-                </select>
-                <p style="font-size: 0.85em; color: var(--text-dim); margin: 4px 0 0 0;">UI 색상 테마를 변경합니다.</p>
+                <p style="font-size: 0.85em; color: var(--text-dim); margin: 4px 0 0 0;">라이트/다크 테마를 전환합니다.</p>
             </div>
             <div class="setting-item">
                 <div class="setting-label">
@@ -234,6 +235,16 @@
                 <p style="font-size: 0.85em; color: var(--text-dim); margin: 4px 0 0 0;">데미지 통계 표시 방식을 변경합니다.</p>
             </div>
         </div>
+    </div>
+    
+    <!-- 내보내기 메뉴 (최상위 레벨) -->
+    <div id="exportMenu" class="dropdown-menu" style="display: none; position: fixed;">
+        <button class="dropdown-item" onclick="exportScreenshot()">
+            <i class="fas fa-download"></i> 이미지 다운로드
+        </button>
+        <button class="dropdown-item" onclick="copyToClipboard()">
+            <i class="fas fa-copy"></i> 이미지 복사
+        </button>
     </div>
     
 </body>

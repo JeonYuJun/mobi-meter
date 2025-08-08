@@ -1,52 +1,52 @@
 /* ========== CSS 변수 정의 (테마 색상) ========== */
 :root {
-    /* 다크 테마 - 기본 색상 (부드러운 톤) */
-    --bg-color:         #0a0a0f;  /* Deep dark blue-black */
-    --bg-soft:          #13131a;  /* Dark purple-grey */
-    --bg-card:          #1a1a24;  /* Slightly lighter */
-    --bg-hover:         #22222e;
-    --text-color:       #f0f0ff;  /* Slight blue tint */
-    --text-dim:         #a8a8b8;
+    /* 치지직 테마 - 기본 색상 */
+    --bg-color:         #0e0e10;  /* 치지직 배경색 */
+    --bg-soft:          #18181b;  /* 카드 배경 */
+    --bg-card:          #1f1f23;  /* 패널 배경 */
+    --bg-hover:         #2a2a2e;
+    --text-color:       #efeff1;  /* 메인 텍스트 */
+    --text-dim:         #adadb8;  /* 보조 텍스트 */
     --text-bright:      #ffffff;
-    --border-color:     rgba(123, 104, 238, 0.15);  /* Softer purple */
-    --border-hover:     rgba(123, 104, 238, 0.3);
+    --border-color:     rgba(83, 83, 95, 0.48);  /* 치지직 테두리 */
+    --border-hover:     rgba(0, 200, 150, 0.4);
     
-    /* 부드러운 악센트 색상 */
-    --primary-color:    #7B68EE;  /* Medium Slate Blue */
-    --secondary-color:  #4FC3F7;  /* Light Blue */
-    --danger-color:     #E91E63;  /* Pink */
-    --success-color:    #66BB6A;  /* Green */
-    --warning-color:    #FFA726;  /* Orange */
-    --info-color:       #AB47BC;  /* Purple */
+    /* 치지직 포인트 색상 */
+    --primary-color:    #00c896;  /* 치지직 민트 */
+    --secondary-color:  #00c896;  /* 치지직 민트 */
+    --danger-color:     #eb0400;  /* 경고/에러 */
+    --success-color:    #00c896;  /* 성공 */
+    --warning-color:    #ffb31a;  /* 주의 */
+    --info-color:       #1f69ff;  /* 정보 */
     
     /* 그래프 및 차트 색상 */
-    --chart-1:          #FF006E;
-    --chart-2:          #00D9FF;
-    --chart-3:          #00FF88;
-    --chart-4:          #FFB700;
-    --chart-5:          #8B5CF6;
+    --chart-1:          #00c896;
+    --chart-2:          #00c896;
+    --chart-3:          #1f69ff;
+    --chart-4:          #ffb31a;
+    --chart-5:          #ff6b6b;
     --chart-bg:         rgba(255, 255, 255, 0.03);
 
-    /* 버튼 스타일 - 네온 효과 */
-    --btn-bg:           rgba(139, 43, 226, 0.1);
-    --btn-bg-hover:     rgba(139, 43, 226, 0.2);
-    --btn-border:       rgba(139, 43, 226, 0.3);
-    --btn-text:         #e0e0ff;
-    --btn-text-hover:   #ffffff;
-    --btn-bg-active:    var(--primary-color);
+    /* 버튼 스타일 - 치지직 */
+    --btn-bg:           transparent;
+    --btn-bg-hover:     rgba(83, 83, 95, 0.48);
+    --btn-border:       transparent;
+    --btn-text:         #adadb8;
+    --btn-text-hover:   #efeff1;
+    --btn-bg-active:    #00c896;
     --btn-text-active:  #ffffff;
 
     /* 상태 색상 */
-    --status-green:     #00FF88;
-    --status-red:       #FF006E;
-    --status-yellow:    #FFB700;
-    --status-border:    rgba(255,255,255,0.2);
+    --status-green:     #00c896;
+    --status-red:       #eb0400;
+    --status-yellow:    #ffb31a;
+    --status-border:    rgba(83, 83, 95, 0.48);
     
-    /* 순위별 악센트 - 더 생동감 있게 */
-    --accent-me:        #00FF88;
-    --accent-gold:      #FFA500;  /* Orange-gold */
-    --accent-silver:    #B794F4;  /* Lavender silver */
-    --accent-bronze:    #F6AD55;  /* Warm orange */
+    /* 순위별 악센트 */
+    --accent-me:        #00c896;
+    --accent-gold:      #ffb31a;
+    --accent-silver:    #b8b8bf;
+    --accent-bronze:    #cd7f32;
     
     /* 그림자 효과 */
     --shadow-sm:        0 2px 4px rgba(0,0,0,0.3);
@@ -96,6 +96,8 @@ body {
     border: 1px solid var(--border-color);
     border-radius: 16px;
     padding: 20px;
+    position: relative;
+    z-index: 1;
     color: var(--text-color);
     display: flex;
     flex-direction: column;
@@ -103,13 +105,10 @@ body {
     position: relative;
     backdrop-filter: blur(10px);
     box-shadow: var(--shadow-md);
-    transition: all 0.3s ease;
+    /* transition 제거 - 성능 최적화 */
 }
 
-.panel:hover {
-    border-color: var(--border-hover);
-    box-shadow: var(--shadow-lg);
-}
+/* panel hover 제거 - 성능 최적화 */
 
 /* ========== 버튼 스타일 ========== */
 .btn {
@@ -118,10 +117,11 @@ body {
     color: var(--btn-text);
     border: 1px solid var(--btn-border);
     border-radius: 6px;
+    transform: translateY(0);
+    transition: background 0.2s, color 0.2s;  /* all 대신 필요한 속성만 - 성능 최적화 */
     font-size: 0.9em;
     font-weight: 500;
     cursor: pointer;
-    transition: background 0.2s, color 0.2s, transform 0.1s;
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -148,13 +148,17 @@ body {
 .btn:hover {
     background: var(--btn-bg-hover);
     color: var(--btn-text-hover);
-    box-shadow: 0 2px 12px rgba(139, 43, 226, 0.4), 0 0 20px rgba(139, 43, 226, 0.2);
-    transform: translateY(-2px);
-    border-color: rgba(139, 43, 226, 0.5);
+}
+
+/* 차트 내부 줌 리셋 버튼 호버 효과 */
+#chartPanel .btn:hover {
+    background: rgba(255,255,255,0.15) !important;
+    border-color: rgba(255,255,255,0.3) !important;
 }
 
 .btn:active {
-    transform: scale(0.97); /* 눌린 효과 */
+    /* transform 제거 - 성능 최적화 */
+    background: rgba(0, 200, 150, 0.2);
 }
 
 .btn.active {
@@ -173,7 +177,7 @@ body {
     background: var(--status-red);
     margin-left: 8px;
     vertical-align: middle;
-    transition: all 0.3s ease;
+    transition: background 0.2s;  /* all 대신 필요한 속성만 - 성능 최적화 */
     position: relative;
     box-shadow: 0 0 15px currentColor;
 }
@@ -188,7 +192,7 @@ body {
     border-radius: 50%;
     background: inherit;
     opacity: 0.3;
-    animation: pulse 2s infinite;
+    /* animation 제거 - 성능 최적화 */
 }
 
 .status-connected {
@@ -235,10 +239,6 @@ body {
     100% { transform: translateX(100%); }
 }
 
-@keyframes pulse-glow {
-    0%, 100% { box-shadow: 0 2px 8px rgba(0,255,136,0.3), 0 0 20px rgba(0,255,136,0.3); }
-    50% { box-shadow: 0 2px 12px rgba(0,255,136,0.5), 0 0 30px rgba(0,255,136,0.5); }
-}
 
 /* ========== 폼 요소 ========== */
 input[type="checkbox"] {
@@ -272,8 +272,8 @@ input[type="checkbox"]:checked::after {
 }
 
 .combobox {
-    background-color: #2a2a2a;
-    color: #e0e0e0;
+    background-color: var(--bg-soft);
+    color: var(--text-color);
     border: 1px solid var(--border-color);
     padding: 6px 8px;
     padding-right: 26px;
@@ -337,18 +337,21 @@ input[type="checkbox"]:checked::after {
     align-items: center;
     gap: 6px;
     padding: 6px 10px;
-    background: rgba(40, 40, 40, 0.8); /* 반투명 다크 */
-    border: 1px solid rgba(255,255,255,0.1);
+    background: var(--bg-soft);
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     font-weight: 500;
     font-size: 0.85em;
     transition: background 0.3s;
     flex-shrink: 0;
     white-space: nowrap;
+    overflow: visible;
+    height: auto;
+    max-height: none;
 }
 
 .my-text-box span {
-    color: #00ffc3; /* 네온 민트 */
+    color: var(--primary-color);
     font-weight: 600;                
 }
 
@@ -379,15 +382,15 @@ input[type="checkbox"]:checked::after {
 }
 
 .rank-1 {
-    color: #f3e38a;
+    color: var(--text-color);
 }
 
 .rank-2 {
-    color: #d0d0d0;
+    color: var(--text-color);
 }
 
 .rank-3 {
-    color: #f3d8bd;
+    color: var(--text-color);
 }
 
 .rank-nonmedal {
@@ -452,9 +455,13 @@ input[type="checkbox"]:checked::after {
     background: linear-gradient(135deg, var(--bg-card) 0%, rgba(139, 43, 226, 0.05) 100%);
     border: 1px solid var(--border-color);
     border-radius: 16px;
+    transition: width 0.1s;  /* all 대신 필요한 속성만 - 성능 최적화 */
+}
+
+
+.damage-card {
     padding: 24px;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
     backdrop-filter: blur(10px);
@@ -490,26 +497,21 @@ input[type="checkbox"]:checked::after {
     transition: transform 0.3s ease;
 }
 
-.damage-card:hover {
-    transform: translateY(-4px) scale(1.02);
-    box-shadow: 0 8px 32px rgba(139, 43, 226, 0.4), 
-                0 0 40px rgba(139, 43, 226, 0.3),
-                inset 0 0 20px rgba(139, 43, 226, 0.1);
-    border-color: rgba(139, 43, 226, 0.6);
-}
-
-.damage-card:hover::after {
-    transform: rotate(45deg) translateX(100%);
-}
-
-.damage-card:hover::before {
-    transform: scaleX(1);
-}
+/* damage-card hover 효과 제거 - 성능 최적화 */
 
 .damage-card.rank-1 {
     border-color: var(--accent-gold);
     background: linear-gradient(135deg, rgba(255,165,0,0.1) 0%, var(--bg-card) 50%);
     box-shadow: 0 4px 20px rgba(255,165,0,0.2);
+}
+
+.damage-card.rank-1 .card-rank {
+    background: linear-gradient(135deg, #FFD700, #FFA500);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: none;
+    filter: drop-shadow(0 0 15px rgba(255, 215, 0, 0.8)) drop-shadow(2px 2px 4px rgba(0, 0, 0, 0.9));
 }
 
 .damage-card.rank-1::before {
@@ -522,6 +524,15 @@ input[type="checkbox"]:checked::after {
     box-shadow: 0 4px 20px rgba(183,148,244,0.2);
 }
 
+.damage-card.rank-2 .card-rank {
+    background: linear-gradient(135deg, #E5E5E5, #C0C0C0);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: none;
+    filter: drop-shadow(0 0 12px rgba(192, 192, 192, 0.8)) drop-shadow(2px 2px 4px rgba(0, 0, 0, 0.9));
+}
+
 .damage-card.rank-2::before {
     background: linear-gradient(90deg, var(--accent-silver), #B8B8B8);
 }
@@ -530,6 +541,15 @@ input[type="checkbox"]:checked::after {
     border-color: var(--accent-bronze);
     background: linear-gradient(135deg, rgba(246,173,85,0.08) 0%, var(--bg-card) 50%);
     box-shadow: 0 4px 20px rgba(246,173,85,0.2);
+}
+
+.damage-card.rank-3 .card-rank {
+    background: linear-gradient(135deg, #CD7F32, #B87333);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: none;
+    filter: drop-shadow(0 0 10px rgba(205, 127, 50, 0.8)) drop-shadow(2px 2px 4px rgba(0, 0, 0, 0.9));
 }
 
 .damage-card.rank-3::before {
@@ -554,7 +574,7 @@ input[type="checkbox"]:checked::after {
     width: 200%;
     height: 200%;
     background: radial-gradient(circle, rgba(0,255,136,0.1) 0%, transparent 70%);
-    animation: rotate 10s linear infinite;
+    /* animation 제거 - 성능 최적화 */
 }
 
 /* ========== 카드 컴포넌트 ========== */
@@ -562,13 +582,13 @@ input[type="checkbox"]:checked::after {
     position: absolute;
     top: 10px;
     right: 10px;
-    font-size: 2.2em;
+    font-size: 2.8em;
     font-weight: 900;
-    opacity: 0.15;
-    background: linear-gradient(135deg, var(--primary-color), var(--primary-dim));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    opacity: 1;
+    color: rgba(255, 255, 255, 0.9);
+    text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.8), 0 0 20px rgba(139, 43, 226, 0.5);
+    letter-spacing: -2px;
+    font-style: italic;
 }
 
 .card-header {
@@ -584,6 +604,7 @@ input[type="checkbox"]:checked::after {
     border-radius: 20px;
     font-size: 0.9em;
     font-weight: 600;
+    color: var(--text-color);
     border: 1px solid rgba(0, 217, 255, 0.2);
     display: flex;
     align-items: center;
@@ -593,15 +614,52 @@ input[type="checkbox"]:checked::after {
 .card-me-badge {
     background: linear-gradient(135deg, var(--accent-me), #00CC6F);
     color: var(--bg-color);
-    padding: 4px 10px;
-    border-radius: 12px;
-    font-size: 0.75em;
+    padding: 6px 8px;
+    border-radius: 50%;
+    font-size: 0.85em;
     font-weight: 700;
     box-shadow: 0 2px 8px rgba(0,255,136,0.3), 0 0 20px rgba(0,255,136,0.3);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
     text-shadow: 0 0 4px rgba(0,0,0,0.5);
-    animation: pulse-glow 2s infinite;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* animation 제거 - 성능 최적화 */
+}
+
+@keyframes pulse-glow {
+    0%, 100% {
+        box-shadow: 0 2px 8px rgba(0,255,136,0.3), 0 0 20px rgba(0,255,136,0.3);
+    }
+    50% {
+        box-shadow: 0 2px 12px rgba(0,255,136,0.5), 0 0 30px rgba(0,255,136,0.5);
+    }
+}
+
+/* 내 캐릭터 카드 강조 */
+.damage-card.me {
+    border: 2px solid var(--accent-me);
+    box-shadow: 0 0 20px rgba(0,200,150,0.3), inset 0 0 20px rgba(0,200,150,0.1);
+}
+
+/* 리스트형 내 캐릭터 표시 */
+.list-me-indicator {
+    color: var(--accent-me);
+    font-size: 0.9em;
+    font-weight: 700;
+    margin-left: 8px;
+    padding: 2px 6px;
+    background: rgba(0,200,150,0.2);
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.damage-list-item.me {
+    background: linear-gradient(90deg, rgba(0,200,150,0.1) 0%, transparent 100%);
+    border-left: 3px solid var(--accent-me);
 }
 
 .card-main-stat {
@@ -678,7 +736,7 @@ input[type="checkbox"]:checked::after {
         transparent, 
         rgba(255,255,255,0.3), 
         transparent);
-    animation: shimmer 2s infinite;
+    /* animation 제거 - 성능 최적화 */
 }
 
 /* ========== 모달 스타일 ========== */
@@ -716,13 +774,13 @@ input[type="checkbox"]:checked::after {
 
 .modal-header {
     padding: 16px 20px;
-    border-bottom: 1px solid rgba(139, 43, 226, 0.2);
+    border-bottom: 2px solid var(--primary-color);
     display: flex;
     justify-content: space-between;
     align-items: center;
     position: sticky;
     top: 0;
-    background: rgba(19, 19, 26, 0.95);
+    background: var(--bg-color);
     z-index: 10;
     border-radius: 16px 16px 0 0;
     backdrop-filter: blur(20px);
@@ -758,11 +816,21 @@ input[type="checkbox"]:checked::after {
     padding: 24px;
     overflow-y: auto;
     flex: 1;
+    
+    /* 스크롤바 숨기기 */
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE/Edge */
+}
+
+.modal-body::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
 }
 
 /* ========== 상세 정보 패널 ========== */
 .detail-panel {
     display: none;
+    overflow: visible;
+    height: auto;
 }
 
 .detail-title {
@@ -792,7 +860,7 @@ input[type="checkbox"]:checked::after {
 }
 
 .detail-value {
-    color: #c0b0fa;
+    color: #00c896;
     font-weight: bold;
     font-size: 0.9em;
     margin-right: 10px;
@@ -821,7 +889,7 @@ input[type="checkbox"]:checked::after {
     align-items: center;
     font-size: 0.85em;
     font-weight: 600;
-    color: var(--text-dim);
+    color: var(--text-color);
     background: var(--bg-soft);
     border-bottom: 2px solid var(--primary-color);
     text-transform: uppercase;
@@ -855,7 +923,7 @@ input[type="checkbox"]:checked::after {
 }
 
 .skill-table .skill-row:hover {
-    background-color: rgba(255, 255, 255, 0.05);
+    background-color: rgba(0, 200, 150, 0.1);
 }
 
 .skill-table .skill-row .bar-bg {
@@ -863,8 +931,8 @@ input[type="checkbox"]:checked::after {
     top: 0;
     left: 0;
     bottom: 0;
-    background: linear-gradient(90deg, var(--primary-color) 0%, transparent 100%);
-    opacity: 0.2;
+    background: linear-gradient(90deg, #00c896 0%, transparent 100%);
+    opacity: 0.15;
     z-index: 0;
     pointer-events: none;
 }
@@ -905,11 +973,11 @@ input[type="checkbox"]:checked::after {
     grid-template-columns: repeat(3, 1fr);
     gap: 16px;
     padding: 0;
-    background-color: rgba(0, 0, 0, 0.3);
+    background-color: var(--bg-soft);
     font-size: 0.85em;
-    color: #ccc;
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
-    transition: all 0.3s ease;
+    color: var(--text-color);
+    box-shadow: inset 0 2px 4px rgba(0, 200, 150, 0.1);
+    transition: max-height 0.2s;  /* all 대신 필요한 속성만 - 성능 최적화 */
     overflow: hidden;
     max-height: 0;
     opacity: 0;
@@ -953,16 +1021,30 @@ input[type="checkbox"]:checked::after {
     display: none !important;
 }
 
+/* ========== 버프 리스트 ========== */
+.buff-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    width: 100%;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+}
+
 /* ========== 버프 아이템 ========== */
 .buff-item {
-    flex: 0 0 25%; 
+    flex: 0 0 calc(25% - 9px); 
+    min-width: 120px;
     display:flex; 
     align-items: center; 
     justify-content: flex-start; 
     white-space: nowrap; 
-    border-radius: 8px 8px;
+    border-radius: 8px;
     border: 1px solid var(--border-color);
     padding: 10px;
+    box-sizing: border-box;
+    margin-bottom: 0;
 }
 
 .buff-item .circle {
@@ -975,7 +1057,7 @@ input[type="checkbox"]:checked::after {
 }
 
 .buff-item:hover {
-    transform: translateY(-2px);
+    /* transform 제거 - 성능 최적화 */
     box-shadow: 0 4px 12px rgba(0, 217, 255, 0.2);
     border-color: rgba(0, 217, 255, 0.3);
 }
@@ -1069,14 +1151,14 @@ input[type="checkbox"]:checked::after {
 }
 
 .toggle-switch {
-    width: 48px;
-    height: 24px;
-    background: var(--bg-dark);
-    border-radius: 12px;
+    width: 40px;
+    height: 20px;
+    background: #53535f;
+    border-radius: 10px;
     position: relative;
     cursor: pointer;
-    transition: background 0.3s;
-    border: 1px solid var(--border-color);
+    transition: background 0.15s ease;
+    border: none;
 }
 
 .toggle-switch::after {
@@ -1084,20 +1166,19 @@ input[type="checkbox"]:checked::after {
     position: absolute;
     top: 2px;
     left: 2px;
-    width: 18px;
-    height: 18px;
-    background: var(--text-dim);
+    width: 16px;
+    height: 16px;
+    background: var(--bg-soft);
     border-radius: 50%;
-    transition: transform 0.3s, background 0.3s;
+    transition: transform 0.15s ease;
 }
 
 .toggle-switch.active {
-    background: var(--primary-color);
-    border-color: var(--primary-color);
+    background: #00c896;
 }
 
 .toggle-switch.active::after {
-    transform: translateX(24px);
+    transform: translateX(20px);
     background: white;
 }
 
@@ -1108,96 +1189,51 @@ body.no-animation * {
 }
 
 /* ========== 테마 변형 ========== */
-/* Synthwave 테마 */
-body[data-theme="synthwave"] {
-    --bg-color:         #0f0814;
-    --bg-soft:          #1a0f26;
-    --bg-card:          #261438;
-    --bg-hover:         #331a4a;
-    --text-color:       #f0e0ff;
-    --text-dim:         #b8a0d0;
-    --border-color:     rgba(255, 0, 128, 0.3);
-    --primary-color:    #FF0080;
-    --secondary-color:  #00D4FF;
-    --success-color:    #00FF88;
-    --warning-color:    #FFB800;
-    --accent-gold:      #FF1493;
-    --accent-silver:    #FF69B4;
-    --accent-bronze:    #FF6347;
-}
-
-/* Matrix 테마 */
-body[data-theme="matrix"] {
-    --bg-color:         #000000;
-    --bg-soft:          #0a0f0a;
-    --bg-card:          #0f1a0f;
-    --bg-hover:         #142214;
-    --text-color:       #00ff00;
-    --text-dim:         #008800;
-    --border-color:     rgba(0, 255, 0, 0.2);
-    --primary-color:    #00ff00;
-    --secondary-color:  #00cc00;
-    --success-color:    #00ff88;
-    --warning-color:    #88ff00;
-    --danger-color:     #00ff00;
-    --accent-gold:      #00ff00;
-    --accent-silver:    #00cc00;
-    --accent-bronze:    #009900;
-}
-
-/* 소프트 다크 테마 */
-body[data-theme="soft-dark"] {
-    --bg-color:         #1a1a1a;
-    --bg-soft:          #242424;
-    --bg-card:          #2e2e2e;
-    --bg-hover:         #353535;
-    --text-color:       #e8e8e8;
-    --text-dim:         #a0a0a0;
-    --border-color:     rgba(255,255,255,0.1);
-    --primary-color:    #64B5F6;
-    --danger-color:     #EF5350;
-    --success-color:    #66BB6A;
-    --warning-color:    #FFA726;
-    --info-color:       #AB47BC;
-}
-
-/* 미니멀 다크 테마 */
-body[data-theme="minimal"] {
-    --bg-color:         #000000;
-    --bg-soft:          #111111;
-    --bg-card:          #1a1a1a;
-    --bg-hover:         #2a2a2a;
-    --text-color:       #ffffff;
-    --text-dim:         #888888;
-    --border-color:     rgba(255,255,255,0.1);
-    --primary-color:    #ffffff;
-    --secondary-color:  #cccccc;
-    --danger-color:     #ff4444;
-    --success-color:    #44ff44;
-    --warning-color:    #ffaa44;
-    --accent-gold:      #ffffff;
-    --accent-silver:    #cccccc;
-    --accent-bronze:    #999999;
-}
-
-/* 고대비 테마 */
-body[data-theme="high-contrast"] {
-    --bg-color:         #000000;
-    --bg-soft:          #0a0a0a;
-    --bg-card:          #141414;
-    --bg-hover:         #1f1f1f;
-    --text-color:       #ffffff;
-    --text-dim:         #b0b0b0;
-    --border-color:     rgba(255,255,255,0.3);
-    --primary-color:    #ffffff;
-    --secondary-color:  #e0e0e0;
-    --danger-color:     #ff6b6b;
-    --success-color:    #51cf66;
-    --warning-color:    #ffd93d;
-    --info-color:       #6bcfff;
-    --accent-gold:      #ffd700;
-    --accent-silver:    #c0c0c0;
+/* 라이트 테마 - 치지직 라이트 스타일 */
+body[data-theme="light"] {
+    --bg-color:         #fafafa;
+    --bg-soft:          #f0f0f2;
+    --bg-card:          #e8e8ea;
+    --bg-hover:         #dcdce0;
+    --text-color:       #0e0e10;
+    --text-dim:         #6b6b75;
+    --text-bright:      #000000;
+    --border-color:     rgba(83, 83, 95, 0.4);
+    --border-hover:     rgba(0, 200, 150, 0.5);
+    
+    /* 라이트 모드 포인트 색상 */
+    --primary-color:    #00c896;
+    --secondary-color:  #00a876;
+    --danger-color:     #eb0400;
+    --success-color:    #00c896;
+    --warning-color:    #ff9500;
+    --info-color:       #1f69ff;
+    
+    /* 특수 색상 - 라이트 모드 */
+    --accent-gold:      #ffa500;
+    --accent-silver:    #757575;
     --accent-bronze:    #cd7f32;
+    --accent-me:        #00c896;
+    
+    /* 버튼 스타일 - 라이트 */
+    --btn-bg:           #f7f7f8;
+    --btn-bg-hover:     #e5e5e8;
+    --btn-border:       rgba(83, 83, 95, 0.2);
+    --btn-text:         #53535f;
+    --btn-text-hover:   #0e0e10;
+    --btn-bg-active:    #00c896;
+    --btn-text-active:  #ffffff;
+    
+    /* 상태 색상 */
+    --status-green:     #00c896;
+    --status-red:       #eb0400;
+    --status-yellow:    #ff9500;
+    --status-blue:      #1f69ff;
+    
+    /* 그림자 효과 - 라이트용 */
+    --shadow-sm:        0 1px 3px rgba(0,0,0,0.12);
+    --shadow-md:        0 4px 12px rgba(0,0,0,0.15);
+    --shadow-lg:        0 8px 24px rgba(0,0,0,0.2);
 }
 
 /* ========== 버튼 그룹 및 드롭다운 ========== */
@@ -1207,16 +1243,13 @@ body[data-theme="high-contrast"] {
 }
 
 .dropdown-menu {
-    position: absolute;
-    top: 100%;
-    right: 0;
+    position: fixed;
     min-width: 180px;
     background: var(--bg-soft);
     border: 1px solid var(--border-color);
     border-radius: 8px;
-    box-shadow: var(--shadow-lg);
-    z-index: 1000;
-    margin-top: 4px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    z-index: 999999;
 }
 
 .dropdown-item {
@@ -1230,7 +1263,7 @@ body[data-theme="high-contrast"] {
     color: var(--text-color);
     font-size: 0.9em;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background 0.15s;  /* all 대신 필요한 속성만 - 성능 최적화 */
     text-align: left;
 }
 
@@ -1265,14 +1298,14 @@ body[data-theme="high-contrast"] {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: 8px;
-    transition: all 0.2s ease;
+    transition: background 0.15s;  /* all 대신 필요한 속성만 - 성능 최적화 */
     position: relative;
     cursor: pointer;
 }
 
 .damage-list-item:hover {
     background: var(--bg-hover);
-    transform: translateX(4px);
+    /* transform 제거 - 성능 최적화 */
     border-color: rgba(0, 217, 255, 0.3);
     box-shadow: 0 2px 8px rgba(0, 217, 255, 0.1);
 }
@@ -1309,6 +1342,7 @@ body[data-theme="high-contrast"] {
     font-weight: 600;
     display: flex;
     align-items: center;
+    color: var(--text-color);
     gap: 6px;
 }
 
@@ -1321,6 +1355,12 @@ body[data-theme="high-contrast"] {
 .list-damage, .list-share {
     font-weight: 600;
     color: var(--text-color);
+}
+
+.list-stat {
+    font-size: 0.9em;
+    color: var(--text-dim);
+    text-align: center;
 }
 
 .list-stat {
@@ -1339,3 +1379,55 @@ body[data-theme="high-contrast"] {
     pointer-events: none;
     border-radius: 8px 0 0 8px;
 }
+
+/* ========== 개선된 애니메이션 ========== */
+.damage-bar {
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.damage-number {
+    animation: damagePopup 1s ease-out;
+}
+
+@keyframes damagePopup {
+    0% { 
+        transform: translateY(0) scale(0.8);
+        opacity: 0;
+    }
+    30% { 
+        transform: translateY(-15px) scale(1.1);
+        opacity: 1;
+    }
+    100% { 
+        transform: translateY(-30px) scale(1);
+        opacity: 0;
+    }
+}
+
+/* 버프 아이콘 회전 애니메이션 */
+.buff-icon.active {
+    /* animation 제거 - 성능 최적화 */
+}
+
+@keyframes rotate {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+
+/* 스킬 사용 리플 효과 */
+.skill-ripple {
+    position: absolute;
+    border-radius: 50%;
+    background: rgba(123, 104, 238, 0.3);
+    animation: ripple 0.6s ease-out;
+    pointer-events: none;
+}
+
+@keyframes ripple {
+    to {
+        transform: scale(4);
+        opacity: 0;
+    }
+}
+

@@ -26,10 +26,13 @@ const selectedDetailSkillName = {};
 // 차트 관련 변수
 let dpsChart = null;             // Chart.js 인스턴스
 let dpsChartData = [];           // DPS 차트 데이터
-let maxDataPoints = 120;         // 2분 데이터로 축소 (성능 개선)
+let maxDataPoints = 3600;        // 30분 데이터 (전체 전투시간 지원)
 let chartInitialized = false;
 let chartUpdateTimeout = null;
 let isTabActive = true;
+let lastRenderHash = null;  // 마지막 렌더링 상태 해시 - 성능 최적화
+let miniChart = null;  // 미니 차트 인스턴스
+let userDpsHistory = {};  // 각 유저의 DPS 히스토리 저장
 let viewMode = localStorage.getItem('viewMode') || 'card';  // 저장된 값 또는 기본값 'card'
 
 // 자동 초기화 관련 변수
@@ -69,6 +72,11 @@ function initDPSChart() {
         return;
     }
     
+    // Chart.js zoom 플러그인 등록
+    if (typeof Chart.register === 'function' && window.ChartZoom) {
+        Chart.register(window.ChartZoom);
+    }
+    
     try {
         const ctx = canvas.getContext('2d');
         if (!ctx) {
@@ -90,9 +98,19 @@ function initDPSChart() {
             },
             interaction: {
                 mode: 'index',
-                intersect: false
+                intersect: false,
+                hover: {
+                    mode: 'nearest',
+                    axis: 'x'
+                }
             },
             plugins: {
+                decimation: {
+                    enabled: true,
+                    algorithm: 'lttb',
+                    samples: 500,
+                    threshold: 1000
+                },
                 legend: {
                     display: true,
                     position: 'top',
@@ -102,7 +120,24 @@ function initDPSChart() {
                             size: 11
                         },
                         usePointStyle: true,
-                        padding: 10
+                        padding: 10,
+                        generateLabels: function(chart) {
+                            const original = Chart.defaults.plugins.legend.labels.generateLabels;
+                            const labels = original.call(this, chart);
+                            labels.forEach(label => {
+                                label.strokeStyle = label.hidden ? 'rgba(128,128,128,0.3)' : label.strokeStyle;
+                                label.fillStyle = label.hidden ? 'rgba(128,128,128,0.3)' : label.fillStyle;
+                            });
+                            return labels;
+                        }
+                    },
+                    onClick: function(e, legendItem, legend) {
+                        const index = legendItem.datasetIndex;
+                        const chart = legend.chart;
+                        const meta = chart.getDatasetMeta(index);
+                        
+                        meta.hidden = meta.hidden === null ? !chart.data.datasets[index].hidden : null;
+                        chart.update('none');
                     }
                 },
                 tooltip: {
@@ -120,19 +155,45 @@ function initDPSChart() {
                     }
                 },
                 zoom: {
+                    limits: {
+                        x: {min: 'original', max: 'original'},
+                        y: {min: 0, max: 'original'}
+                    },
                     zoom: {
                         wheel: {
-                            enabled: false
+                            enabled: true,
+                            speed: 0.1,
+                            modifierKey: null
                         },
                         pinch: {
+                            enabled: true
+                        },
+                        mode: 'x',
+                        drag: {
                             enabled: false
                         },
-                        mode: 'x'
+                        onZoomStart: function({chart}) {
+                            chart.isZooming = true;
+                            // 줌 표시기 보이기
+                            const indicator = document.getElementById('zoomIndicator');
+                            if (indicator) {
+                                indicator.style.display = 'inline-block';
+                            }
+                        },
+                        onZoomComplete: function({chart}) {
+                            chart.isZooming = false;
+                            // 줌 레벨 확인
+                            const xScale = chart.scales.x;
+                            const isZoomed = xScale.min !== xScale.options.min || xScale.max !== xScale.options.max;
+                            
+                            const indicator = document.getElementById('zoomIndicator');
+                            if (indicator) {
+                                indicator.style.display = isZoomed ? 'inline-block' : 'none';
+                            }
+                        }
                     },
                     pan: {
-                        enabled: true,
-                        mode: 'x',
-                        modifierKey: null
+                        enabled: false
                     }
                 }
             },
@@ -150,12 +211,27 @@ function initDPSChart() {
                         },
                         maxRotation: 0,
                         autoSkip: true,
-                        maxTicksLimit: 10
+                        maxTicksLimit: 15,
+                        callback: function(value, index, ticks) {
+                            const totalPoints = this.chart.data.labels.length;
+                            // 데이터가 많을 때는 간격을 넓혀서 표시
+                            if (totalPoints > 300) {
+                                // 5분마다 표시
+                                return index % Math.ceil(totalPoints / 12) === 0 ? this.chart.data.labels[index] : '';
+                            } else if (totalPoints > 120) {
+                                // 2분마다 표시  
+                                return index % Math.ceil(totalPoints / 20) === 0 ? this.chart.data.labels[index] : '';
+                            } else {
+                                // 기본 표시
+                                return this.chart.data.labels[index];
+                            }
+                        }
                     }
                 },
                 y: {
                     display: true,
                     beginAtZero: true,
+                    grace: '10%',
                     grid: {
                         color: 'rgba(255, 255, 255, 0.05)',
                         drawBorder: false
@@ -166,6 +242,11 @@ function initDPSChart() {
                             size: 10
                         },
                         callback: function(value) {
+                            if (value >= 1000000) {
+                                return (value / 1000000).toFixed(1) + 'M';
+                            } else if (value >= 1000) {
+                                return (value / 1000).toFixed(0) + 'k';
+                            }
                             return value.toLocaleString();
                         }
                     }
@@ -182,10 +263,211 @@ function initDPSChart() {
         console.error('차트 초기화 실패:', error);
         chartInitialized = false;
         dpsChart = null;
-        // 재시도
-        setTimeout(initDPSChart, 500);
+        // 재시도 (더 긴 대기시간)
+        setTimeout(() => {
+            console.log('차트 초기화 재시도...');
+            initDPSChart();
+        }, 1000);
     }
 }
+
+// 사용자 DPS 히스토리 업데이트 (5초마다)
+let lastDpsUpdate = 0;
+function updateUserDpsHistory() {
+    const now = Date.now();
+    if (now - lastDpsUpdate < 5000) return;  // 5초마다만 업데이트
+    lastDpsUpdate = now;
+    
+    const tid = getTargetID();
+    const db = singleMode ? damageDB2 : damageDB;
+    
+    for (const uid in db) {
+        if (db[uid] && db[uid][tid]) {
+            const userStats = db[uid][tid];
+            const totalDamage = userStats[""].all.total_damage || 0;
+            const runtime = getRuntimeSec();
+            const currentDps = runtime > 0 ? Math.floor(totalDamage / runtime) : 0;
+            
+            if (!userDpsHistory[uid]) {
+                userDpsHistory[uid] = [];
+            }
+            
+            userDpsHistory[uid].push(currentDps);
+            
+            // 최대 360개 (30분) 데이터만 유지
+            if (userDpsHistory[uid].length > 360) {
+                userDpsHistory[uid].shift();
+            }
+        }
+    }
+}
+
+// 미니 DPS 차트 초기화
+function initMiniDPSChart(uid) {
+    const canvas = document.getElementById('miniDPSChart');
+    if (!canvas) return;
+    
+    // 기존 차트 제거
+    if (miniChart) {
+        try {
+            miniChart.destroy();
+        } catch (e) {
+            console.error('미니 차트 제거 중 오류:', e);
+        }
+    }
+    
+    // Chart.js zoom 플러그인 등록 (미니 차트용)
+    if (typeof Chart.register === 'function' && window.ChartZoom) {
+        Chart.register(window.ChartZoom);
+    }
+    
+    const ctx = canvas.getContext('2d');
+    
+    // 해당 유저의 DPS 히스토리 가져오기
+    const history = userDpsHistory[uid] || [];
+    
+    // 데이터가 없으면 현재 값만 표시
+    if (history.length === 0) {
+        const tid = getTargetID();
+        const db = singleMode ? damageDB2 : damageDB;
+        if (db[uid] && db[uid][tid]) {
+            const userStats = db[uid][tid];
+            const totalDamage = userStats[""].all.total_damage || 0;
+            const runtime = getRuntimeSec();
+            const currentDps = runtime > 0 ? Math.floor(totalDamage / runtime) : 0;
+            history.push(currentDps);
+        }
+    }
+    
+    // 레이블과 데이터 준비
+    const labels = [];
+    const data = [...history];
+    
+    // 시간 레이블 생성 (5초 간격)
+    for (let i = 0; i < data.length; i++) {
+        const seconds = i * 5;
+        if (seconds % 30 === 0) {
+            labels.push(`${Math.floor(seconds/60)}:${(seconds%60).toString().padStart(2,'0')}`);
+        } else {
+            labels.push('');
+        }
+    }
+    
+    try {
+        miniChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'DPS',
+                data: data,
+                borderColor: '#00ff88',
+                backgroundColor: 'rgba(0, 255, 136, 0.2)',
+                borderWidth: 2,
+                tension: 0.4,
+                fill: true,
+                pointRadius: 0,
+                pointHoverRadius: 5,
+                pointHoverBackgroundColor: '#00ff88',
+                pointHoverBorderColor: '#fff',
+                pointHoverBorderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: {
+                duration: 0
+            },
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    titleColor: '#fff',
+                    bodyColor: '#fff',
+                    callbacks: {
+                        title: function(context) {
+                            const index = context[0].dataIndex;
+                            const seconds = index * 5;
+                            return `${Math.floor(seconds/60)}:${(seconds%60).toString().padStart(2,'0')}`;
+                        },
+                        label: function(context) {
+                            return context.parsed.y.toLocaleString() + ' DPS';
+                        }
+                    }
+                },
+                zoom: {
+                    zoom: {
+                        wheel: {
+                            enabled: false
+                        },
+                        pinch: {
+                            enabled: false
+                        }
+                    },
+                    pan: {
+                        enabled: false
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    display: true,
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.05)',
+                        drawBorder: false
+                    },
+                    ticks: {
+                        color: '#999',
+                        font: {
+                            size: 8
+                        },
+                        maxTicksLimit: 6,
+                        callback: function(value, index) {
+                            const seconds = index * 5;
+                            if (seconds % 30 === 0) {
+                                return `${Math.floor(seconds/60)}:${(seconds%60).toString().padStart(2,'0')}`;
+                            }
+                            return '';
+                        }
+                    }
+                },
+                y: {
+                    display: true,
+                    beginAtZero: true,
+                    grace: '10%',
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.05)',
+                        drawBorder: false
+                    },
+                    ticks: {
+                        color: '#999',
+                        font: {
+                            size: 9
+                        },
+                        maxTicksLimit: 4,
+                        callback: function(value) {
+                            if (value >= 1000000) {
+                                return (value / 1000000).toFixed(1) + 'M';
+                            } else if (value >= 1000) {
+                                return (value / 1000).toFixed(0) + 'k';
+                            }
+                            return value;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    } catch (error) {
+        console.error('미니 차트 초기화 실패:', error);
+        miniChart = null;
+    }
+}
+
 
 // DPS 차트 데이터 업데이트
 function updateDPSChart() {
@@ -199,22 +481,30 @@ function updateDPSChart() {
     // 차트가 아직 초기화되지 않았고 데이터가 있으면 초기화
     if (!dpsChart || !chartInitialized) {
         console.log('첫 데이터 수신, 차트 초기화 시작...');
-        // 차트 패널 표시
+        // 차트 토글이 활성화되어 있을 때만 차트 패널 표시
+        const chartToggle = document.getElementById('chartToggle');
         const chartPanel = document.getElementById('chartPanel');
-        if (chartPanel) {
+        if (chartPanel && chartToggle && chartToggle.classList.contains('active')) {
             chartPanel.style.display = 'block';
+            initDPSChart();
+            // 초기화 후 다음 업데이트에서 데이터 표시
+            setTimeout(() => updateDPSChart(), 100);
         }
-        initDPSChart();
-        // 초기화 후 다음 업데이트에서 데이터 표시
-        setTimeout(() => updateDPSChart(), 100);
         return;
     }
-    const currentTime = new Date().toLocaleTimeString('ko-KR', { 
-        hour12: false, 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        second: '2-digit' 
-    });
+    // 데이터가 많을 때는 시간 형식 간소화
+    const currentTime = dpsChart.data.labels.length > 60 
+        ? new Date().toLocaleTimeString('ko-KR', { 
+            hour12: false, 
+            minute: '2-digit', 
+            second: '2-digit' 
+        })
+        : new Date().toLocaleTimeString('ko-KR', { 
+            hour12: false, 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            second: '2-digit' 
+        });
     
     // 새로운 레이블 추가
     if (dpsChart.data.labels.length >= maxDataPoints) {
@@ -222,16 +512,23 @@ function updateDPSChart() {
     }
     dpsChart.data.labels.push(currentTime);
     
-    // 데이터셋 업데이트 또는 생성
-    const colors = ['#FF6B6B', '#4D9DE0', '#7AE582', '#FFD93D', '#A05ED9', '#E65A9C'];
+    // 데이터셋 업데이트 또는 생성 - 더 구분 가능한 색상
+    const colors = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#95E77E', '#B19CD9', '#FF9A8B', '#6C88C4', '#FFB347'];
     const top5 = sorted.slice(0, 5);
     
+    // 전체 평균 DPS 계산
+    let totalDpsSum = 0;
+    let totalCount = 0;
+    
     // 기존 데이터셋 업데이트
-    dpsChart.data.datasets = top5.map(([user_id, item], idx) => {
+    const newDatasets = top5.map(([user_id, item], idx) => {
         const total = item[""].all.total_damage || 0;
         const dps = Math.floor(total / (getRuntimeSec() + 1));
         const jobName = userData[user_id] ? userData[user_id].job : user_id;
         const isSelf = selfID == user_id;
+        
+        totalDpsSum += dps;
+        totalCount++;
         
         // 기존 데이터셋 찾기
         let dataset = dpsChart.data.datasets.find(ds => ds.label === jobName);
@@ -244,7 +541,10 @@ function updateDPSChart() {
                 borderWidth: isSelf ? 3 : 2,
                 tension: 0.4,
                 pointRadius: 0,
-                pointHoverRadius: 5
+                pointHoverRadius: 7,
+                pointHoverBackgroundColor: isSelf ? '#00ff88' : colors[idx % colors.length],
+                pointHoverBorderColor: '#fff',
+                pointHoverBorderWidth: 2
             };
         }
         
@@ -257,7 +557,77 @@ function updateDPSChart() {
         return dataset;
     });
     
-    dpsChart.update('none');
+    // 평균선 데이터셋 추가
+    const averageDps = totalCount > 0 ? Math.floor(totalDpsSum / totalCount) : 0;
+    const averageDataset = {
+        label: '평균 DPS',
+        data: new Array(dpsChart.data.labels.length).fill(averageDps),
+        borderColor: 'rgba(255, 255, 255, 0.3)',
+        backgroundColor: 'transparent',
+        borderWidth: 1,
+        borderDash: [5, 5],
+        tension: 0,
+        pointRadius: 0,
+        pointHoverRadius: 0,
+        fill: false
+    };
+    
+    // 전체 데이터셋 설정 (평균선 포함)
+    dpsChart.data.datasets = [...newDatasets, averageDataset];
+    
+    // 각 데이터셋의 최고점 찾기 및 표시
+    newDatasets.forEach(dataset => {
+        const maxValue = Math.max(...dataset.data);
+        const maxIndex = dataset.data.lastIndexOf(maxValue);
+        
+        // 최고점에 표시를 위해 pointRadius 설정
+        dataset.pointRadius = dataset.data.map((value, index) => {
+            return index === maxIndex && value === maxValue ? 5 : 0;
+        });
+        dataset.pointBackgroundColor = dataset.borderColor;
+        dataset.pointBorderColor = '#fff';
+        dataset.pointBorderWidth = 2;
+    });
+    
+    // 차트 업데이트 (줌 상태 유지)
+    if (dpsChart && !dpsChart.isZooming) {
+        dpsChart.update('none');
+    }
+}
+
+// 차트 줌 리셋 함수 (애니메이션 포함)
+function resetChartZoom() {
+    if (dpsChart) {
+        // 줌 상태 플래그 해제
+        dpsChart.isZooming = false;
+        
+        // 줌 리셋 (애니메이션)
+        dpsChart.resetZoom('default');
+        
+        // 버튼에 시각적 피드백
+        const button = event.currentTarget;
+        if (button) {
+            button.style.transform = 'scale(0.95)';
+            button.style.transition = 'transform 0.1s';
+            setTimeout(() => {
+                button.style.transform = 'scale(1)';
+            }, 100);
+        }
+        
+        // 줌 표시기 숨기기
+        const indicator = document.getElementById('zoomIndicator');
+        if (indicator) {
+            indicator.style.display = 'none';
+        }
+        
+        // 차트 업데이트 재개를 위한 플래그 리셋
+        setTimeout(() => {
+            if (dpsChart) {
+                dpsChart.isZooming = false;
+                console.log('차트 줌 초기화 완료 - 실시간 업데이트 재개');
+            }
+        }, 300);
+    }
 }
 
 (function(){
@@ -347,6 +717,23 @@ function calcPercent(numerator, denominator){
 
 // ========== 상세 정보 모달 관련 함수 ==========
 // 플레이어 상세 정보 모달 표시
+// 모달 닫기 함수
+function closeDetailModal() {
+    const detailModal = document.getElementById('detailModal');
+    if (detailModal) {
+        detailModal.classList.remove('open');
+    }
+    // 미니 차트 제거
+    if (miniChart) {
+        try {
+            miniChart.destroy();
+        } catch (e) {
+            console.error('미니 차트 제거 중 오류:', e);
+        }
+        miniChart = null;
+    }
+}
+
 function showDetailModal(uid) {
     const modal = document.getElementById('detailModal');
     const modalBody = document.getElementById('modalBody');
@@ -368,6 +755,22 @@ function showDetailModal(uid) {
     statsSection.innerHTML = '<h3 style="margin-bottom: 16px;">전투 통계</h3>';
     renderDetailStats(uid, statsSection);
     modalBody.appendChild(statsSection);
+    
+    // 개인 DPS 미니 차트 섹션
+    const chartSection = document.createElement('div');
+    chartSection.style.marginTop = '24px';
+    chartSection.innerHTML = `
+        <h3 style="margin-bottom: 16px;">DPS 추이</h3>
+        <div style="position: relative; height: 150px; background: var(--bg-soft); border-radius: 8px; padding: 10px;">
+            <canvas id="miniDPSChart" style="max-height: 130px;"></canvas>
+        </div>
+    `;
+    modalBody.appendChild(chartSection);
+    
+    // 미니 차트 초기화
+    setTimeout(() => {
+        initMiniDPSChart(uid);
+    }, 100);
     
     // 버프 섹션
     const buffSection = document.createElement('div');
@@ -443,28 +846,82 @@ function renderDetailStats(uid, container) {
     const skill = selectedDetailSkillName[uid] ?? "";
     const db = singleMode ? damageDB2[uid][tid][skill] : damageDB[uid][tid][skill];
     
+    // 전투 데이터 계산
+    const totalDamage = db.all.total_damage || 0;
+    const combatTime = getRuntimeSec();
+    const dps = combatTime > 0 ? Math.floor(totalDamage / combatTime) : 0;
+    
+    // 전체 대미지 중 비율 계산
+    const sorted = calcSortedItems();
+    const totalSum = sorted.reduce((sum, [uid,stat]) => sum + (stat[""].all.total_damage || 0), 0);
+    const damageRate = totalSum > 0 ? ((totalDamage / totalSum) * 100).toFixed(1) : 0;
+    
+    // 타격 횟수 계산
+    const totalHits = (db.normal.total_count || 0) + (db.special.total_count || 0) + (db.dot.total_count || 0);
+    
+    // 각종 확률 계산
     const critRate = calcCritHitPercent(db);
     const addhitRate = calcAddHitPercent(db);
+    const powerRate = totalHits > 0 ? ((db.normal.power_count + db.special.power_count) / totalHits * 100).toFixed(1) : 0;
+    const fastRate = totalHits > 0 ? ((db.normal.fast_count + db.special.fast_count) / totalHits * 100).toFixed(1) : 0;
+    
+    // 버프 데이터
     const atkbuff = divideForDis(db.buff.total_atk, db.buff.total_count);
     const dmgbuff = divideForDis(db.buff.total_dmg, db.buff.total_count);
     
+    // 기존 통계 섹션 제거
+    const existingStats = container.querySelector('.modal-stats-container');
+    if (existingStats) {
+        existingStats.remove();
+    }
+    
     const statsHtml = `
-        <div class="card-stats" style="background: var(--bg-soft); padding: 16px; border-radius: 8px;">
-            <div class="card-stat">
-                <div class="card-stat-value">${critRate}%</div>
-                <div class="card-stat-label">크리티컬 확률</div>
-            </div>
-            <div class="card-stat">
-                <div class="card-stat-value">${addhitRate}%</div>
-                <div class="card-stat-label">추가타 확률</div>
-            </div>
-            <div class="card-stat">
-                <div class="card-stat-value">${atkbuff}</div>
-                <div class="card-stat-label">평균 공격력 증가</div>
-            </div>
-            <div class="card-stat">
-                <div class="card-stat-value">${dmgbuff}</div>
-                <div class="card-stat-label">평균 피해 증가</div>
+        <div class="modal-stats-container" style="margin-top: 12px;">
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+                <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
+                    <div style="font-size: 0.7em; color: var(--text-dim);">총 데미지</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; word-break: break-all; margin-top: 8px;">${totalDamage.toLocaleString()}</div>
+                </div>
+                <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
+                    <div style="font-size: 0.7em; color: var(--text-dim);">DPS</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; word-break: break-all; margin-top: 8px;">${dps.toLocaleString()}</div>
+                </div>
+                <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
+                    <div style="font-size: 0.7em; color: var(--text-dim);">데미지 비율</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; margin-top: 8px;">${damageRate}%</div>
+                </div>
+                <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
+                    <div style="font-size: 0.7em; color: var(--text-dim);">전투 시간</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; margin-top: 8px;">${Math.floor(combatTime)}초</div>
+                </div>
+                <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
+                    <div style="font-size: 0.7em; color: var(--text-dim);">총 타격수</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; word-break: break-all; margin-top: 8px;">${totalHits.toLocaleString()}</div>
+                </div>
+                <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
+                    <div style="font-size: 0.7em; color: var(--text-dim);">치명타</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; margin-top: 8px;">${critRate}%</div>
+                </div>
+                <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
+                    <div style="font-size: 0.7em; color: var(--text-dim);">추가타</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; margin-top: 8px;">${addhitRate}%</div>
+                </div>
+                <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
+                    <div style="font-size: 0.7em; color: var(--text-dim);">강타율</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; margin-top: 8px;">${powerRate}%</div>
+                </div>
+                <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
+                    <div style="font-size: 0.7em; color: var(--text-dim);">연타율</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; margin-top: 8px;">${fastRate}%</div>
+                </div>
+                <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
+                    <div style="font-size: 0.7em; color: var(--text-dim);">평균 공증</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; margin-top: 8px;">${atkbuff}%</div>
+                </div>
+                <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
+                    <div style="font-size: 0.7em; color: var(--text-dim);">평균 피증</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; margin-top: 8px;">${dmgbuff}%</div>
+                </div>
             </div>
         </div>
     `;
@@ -496,7 +953,7 @@ function renderDetailBuffs(uid, container) {
     
     // 탭 네비게이션 생성
     let tabsHtml = '<div style="display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 2px solid var(--border-color); padding-bottom: 8px;">';
-    tabsHtml += '<button class="buff-tab active" data-type="all" style="padding: 8px 16px; background: var(--primary-color); color: white; border: none; border-radius: 4px 4px 0 0; cursor: pointer;">전체</button>';
+    tabsHtml += '<button class="buff-tab active" data-type="all" style="padding: 8px 16px; background: var(--primary-color); color: var(--bg-color); border: none; border-radius: 4px 4px 0 0; cursor: pointer;">전체</button>';
     
     for (const [typeCode, typeName] of Object.entries(typeNames)) {
         if (buffsByType[typeCode] && buffsByType[typeCode].length > 0) {
@@ -506,7 +963,7 @@ function renderDetailBuffs(uid, container) {
     tabsHtml += '</div>';
     
     // 버프 컨테이너
-    let buffHtml = '<div class="buff-container" style="max-height: 300px; overflow-y: auto; background: var(--bg-soft); padding: 16px; border-radius: 8px;">';
+    let buffHtml = '<div class="buff-container" style="height: auto; overflow: visible; background: var(--bg-soft); padding: 16px; border-radius: 8px;">';
     buffHtml += '<div class="buff-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">';
     
     // 모든 버프 표시 (초기 상태)
@@ -514,7 +971,7 @@ function renderDetailBuffs(uid, container) {
         buffList.sort((a, b) => parseFloat(b.uptime) - parseFloat(a.uptime)); // 가동률 순으로 정렬
         buffList.forEach(buff => {
             buffHtml += `
-                <div class="buff-item" data-type="${typeCode}" style="display: flex; align-items: center; padding: 12px; background: var(--bg-dark); border-radius: 6px; border: 1px solid var(--border-color);">
+                <div class="buff-item" data-type="${typeCode}" style="display: flex; align-items: center; padding: 12px; background: var(--bg-soft); border-radius: 6px; border: 1px solid var(--border-color);">
                     <div class="circle" style="width: 12px; height: 12px; border-radius: 50%; background:#${buff.color}; margin-right: 12px; flex-shrink: 0;"></div>
                     <div style="flex: 1; overflow: hidden;">
                         <div style="font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${buff.name}</div>
@@ -868,10 +1325,23 @@ function rankItem(rank, isSelf, jobName, total, totalRate, dps, critRate, addhit
 // 데미지 순위 표시 함수
 // 데미지 순위 전체 렌더링
 function renderDamageRanks() {
+    const sorted = calcSortedItems()
+    
+    // 데이터 해시 생성 - 성능 최적화
+    const currentHash = JSON.stringify(sorted.map(([uid, stat]) => ({
+        uid,
+        damage: Math.floor(stat[""].all.total_damage / 100) * 100, // 100 단위로 반올림
+        dps: Math.floor(stat[""].all.dps / 10) * 10 // 10 단위로 반올림
+    })));
+    
+    // 데이터가 크게 변하지 않았으면 렌더링 건너뛰기 - 성능 최적화
+    if (lastRenderHash === currentHash) {
+        return;
+    }
+    lastRenderHash = currentHash;
+    
     const statsList = document.getElementById('damage-stats-list');
     while (statsList.firstChild) statsList.removeChild(statsList.firstChild);
-
-    const sorted = calcSortedItems()
     
     // 데이터가 없을 때 빈 상태 표시
     if (sorted.length === 0) {
@@ -879,6 +1349,7 @@ function renderDamageRanks() {
         emptyMessage.style.cssText = 'text-align: center; padding: 40px; color: var(--text-dim); font-size: 0.9em;';
         emptyMessage.innerHTML = '<i class="fas fa-info-circle"></i> 측정된 데이터가 없습니다';
         statsList.appendChild(emptyMessage);
+        lastRenderHash = null;  // 빈 상태일 때 해시 초기화
         return;
     }
     
@@ -889,17 +1360,25 @@ function renderDamageRanks() {
         statsList.className = 'damage-list-container';
         renderListView(sorted, totalSum);
     } else {
-        statsList.className = 'damage-cards-container';
+        statsList.className = '';  // 클래스 제거 - CSS와 충돌 방지
         renderCardView(sorted, totalSum);
     }
 }
 
-// 카드 뷰 렌더링
+// 카드 뷰 렌더링 (하이브리드: 상위 3명 카드, 나머지 리스트)
 // 카드형 뷰 렌더링
 function renderCardView(sorted, totalSum) {
     const statsList = document.getElementById('damage-stats-list');
     
-    sorted.forEach(([user_id, item], idx) => {
+    // 전체 컨테이너 생성
+    const fullContainer = document.createElement('div');
+    fullContainer.style.cssText = 'display: flex; flex-direction: column; gap: 20px; width: 100%;';
+    
+    // 상위 3명까지만 카드로 표시
+    const top3Container = document.createElement('div');
+    top3Container.style.cssText = 'display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 20px !important; width: 100% !important;';
+    
+    sorted.slice(0, 3).forEach(([user_id, item], idx) => {
         const stat = item[""];
         const total = stat.all.total_damage || 0;
         const critRate = calcCritHitPercent(stat);
@@ -929,7 +1408,7 @@ function renderCardView(sorted, totalSum) {
             <div class="card-rank">#${idx + 1}</div>
             <div class="card-header">
                 <div class="card-job">${jobName}${rankIcon}</div>
-                ${isSelf ? '<div class="card-me-badge">ME</div>' : ''}
+                ${isSelf ? '<div class="card-me-badge"><i class="fas fa-user"></i></div>' : ''}
             </div>
             <div class="card-main-stat">
                 <div class="card-dps">${dps.toLocaleString()}</div>
@@ -958,8 +1437,77 @@ function renderCardView(sorted, totalSum) {
             </div>
         `;
         
-        statsList.appendChild(card);
+        top3Container.appendChild(card);
     });
+    
+    fullContainer.appendChild(top3Container);
+    
+    // 4등부터는 간단한 리스트로 표시
+    if (sorted.length > 3) {
+        const listContainer = document.createElement('div');
+        listContainer.className = 'damage-list-container';
+        listContainer.style.cssText = 'margin-top: 20px; width: 100%;';
+        
+        // 리스트 헤더 추가
+        const header = document.createElement('div');
+        header.className = 'damage-list-item';
+        header.style.cssText = 'background: var(--bg-soft); font-weight: 600; font-size: 0.85em; color: var(--text-dim); cursor: default;';
+        header.innerHTML = `
+            <div class="list-rank">순위</div>
+            <div>직업</div>
+            <div>DPS</div>
+            <div>총 데미지</div>
+            <div>점유율</div>
+            <div class="list-stat">크리율</div>
+            <div class="list-stat">추가타</div>
+            <div class="list-stat">공증</div>
+            <div class="list-stat">피증</div>
+        `;
+        listContainer.appendChild(header);
+        
+        // 4등부터 리스트 아이템 추가
+        sorted.slice(3).forEach(([user_id, item], originalIdx) => {
+            const idx = originalIdx + 3; // 실제 순위
+            const stat = item[""];
+            const total = stat.all.total_damage || 0;
+            const critRate = calcCritHitPercent(stat);
+            const addhitRate = calcAddHitPercent(stat);
+            const atkbuff = divideForDis(stat.buff.total_atk, stat.buff.total_count);
+            const dmgbuff = divideForDis(stat.buff.total_dmg, stat.buff.total_count);
+            const dps = Math.floor(total/(getRuntimeSec()+1));
+            const totalRate = sorted.length === 1 ? 1 : totalSum > 0 ? total / totalSum : 0;
+            const jobName = userData[user_id] ? userData[user_id].job : user_id;
+            const isSelf = selfID == user_id;
+            
+            const listItem = document.createElement('div');
+            listItem.className = 'damage-list-item';
+            if (isSelf) listItem.classList.add('me');
+            
+            listItem.dataset.userId = user_id;
+            
+            listItem.innerHTML = `
+                <div class="list-damage-bar" style="width: ${totalRate * 100}%"></div>
+                <div class="list-rank">${idx + 1}</div>
+                <div class="list-job">
+                    ${jobName}
+                    ${isSelf ? '<span class="list-me-indicator"><i class="fas fa-user"></i></span>' : ''}
+                </div>
+                <div class="list-dps">${dps.toLocaleString()}</div>
+                <div class="list-damage">${total.toLocaleString()}</div>
+                <div class="list-share">${(totalRate * 100).toFixed(1)}%</div>
+                <div class="list-stat">${critRate}%</div>
+                <div class="list-stat">${addhitRate}%</div>
+                <div class="list-stat">${atkbuff}</div>
+                <div class="list-stat">${dmgbuff}</div>
+            `;
+            
+            listContainer.appendChild(listItem);
+        });
+        
+        fullContainer.appendChild(listContainer);
+    }
+    
+    statsList.appendChild(fullContainer);
 }
 
 // 리스트 뷰 렌더링
@@ -1017,7 +1565,7 @@ function renderListView(sorted, totalSum) {
             <div class="list-job">
                 ${jobName}
                 ${rankIcon}
-                ${isSelf ? '<span style="color: var(--accent-me); font-size: 0.8em; font-weight: 700;">[ME]</span>' : ''}
+                ${isSelf ? '<span class="list-me-indicator"><i class="fas fa-user"></i></span>' : ''}
             </div>
             <div class="list-dps">${dps.toLocaleString()}</div>
             <div class="list-damage">${total.toLocaleString()}</div>
@@ -1099,6 +1647,18 @@ function clearDB () {
         }
         dpsChart = null;
     }
+    // 미니 차트도 제거
+    if (miniChart) {
+        try {
+            miniChart.destroy();
+        } catch (e) {
+            console.error('미니 차트 제거 중 오류:', e);
+        }
+        miniChart = null;
+    }
+    // DPS 히스토리 초기화
+    userDpsHistory = {};
+    lastDpsUpdate = 0;
     
     // 모든 UI 초기화
     document.getElementById('runtime-text').textContent = '0.00초';
@@ -1161,7 +1721,7 @@ function checkAutoReset() {
 // 자동 초기화 타이머 시작
 function startAutoResetTimer() {
     if (!autoResetInterval) {
-        autoResetInterval = setInterval(checkAutoReset, 5000); // 5초마다 체크
+        autoResetInterval = setInterval(checkAutoReset, 10000); // 10초마다 체크 - 성능 최적화
     }
 }
 
@@ -1242,11 +1802,12 @@ function startAutoResetTimer() {
 
 })();
 
-const saveAllBtn = document.getElementById('saveAllBtn');
-saveAllBtn.onclick = () => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close();
-    }
+// 저장 버튼 이벤트
+document.addEventListener('DOMContentLoaded', () => {
+    const saveAllBtn = document.getElementById('saveAllBtn');
+    if (saveAllBtn) {
+        saveAllBtn.onclick = () => {
+    // WebSocket 연결은 유지
     function getKoreaTime(){
         const now = new Date();
         const kst = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
@@ -1277,24 +1838,24 @@ saveAllBtn.onclick = () => {
     setTimeout(() => {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-    }, 100);
-};
-
-// 데이터 불러오기 버튼 및 파일 input 생성
-const loadAllBtn = document.getElementById('loadAllBtn');
-let fileInput = document.createElement('input');
-fileInput.type = 'file';
-fileInput.accept = '.json';
-
-loadAllBtn.onclick = () => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close();
+        }, 100);
+    };
     }
-    fileInput.value = '';
-    fileInput.click();
-};
-
-fileInput.onchange = (e) => {
+    
+    // 데이터 불러오기 버튼 및 파일 input 생성
+    const loadAllBtn = document.getElementById('loadAllBtn');
+    if (loadAllBtn) {
+        let fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.json';
+        
+        loadAllBtn.onclick = () => {
+            // WebSocket 연결은 유지
+            fileInput.value = '';
+            fileInput.click();
+        };
+        
+        fileInput.onchange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -1319,14 +1880,26 @@ fileInput.onchange = (e) => {
             alert('불러오기 실패: ' + err);
         }
     };
-    reader.readAsText(file, 'utf-8');
-};
+        reader.readAsText(file, 'utf-8');
+        };
+    }
+});
 
 // 내보내기 메뉴 토글
 document.getElementById('exportBtn').onclick = (e) => {
     e.stopPropagation();
+    const btn = document.getElementById('exportBtn');
     const menu = document.getElementById('exportMenu');
-    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+    
+    if (menu.style.display === 'none') {
+        // 버튼의 위치를 가져와서 메뉴 위치 설정
+        const rect = btn.getBoundingClientRect();
+        menu.style.top = (rect.bottom + 5) + 'px';
+        menu.style.left = Math.max(10, rect.left - 100) + 'px'; // 메뉴가 버튼보다 넓으므로 조정
+        menu.style.display = 'block';
+    } else {
+        menu.style.display = 'none';
+    }
 };
 
 // 클릭 외부 시 메뉴 닫기
@@ -1334,10 +1907,11 @@ document.addEventListener('click', () => {
     document.getElementById('exportMenu').style.display = 'none';
 });
 
-// 스크린샷 기능
+// 스크린샷 기능  
 window.exportScreenshot = async () => {
-    const statsPanel = document.querySelector('.panel:has(#damage-stats-list)');
-    if (!statsPanel) return;
+    // 전체 컨테이너 찾기
+    const container = document.querySelector('.container');
+    if (!container) return;
     
     // html2canvas 라이브러리 로드
     if (!window.html2canvas) {
@@ -1348,10 +1922,48 @@ window.exportScreenshot = async () => {
     }
     
     try {
-        const canvas = await html2canvas(statsPanel, {
-            backgroundColor: '#0f0f0f',
-            scale: 2
+        // 스크롤 위치 초기화
+        const originalScrollY = window.scrollY;
+        window.scrollTo(0, 0);
+        
+        // 모든 스크롤 가능 영역의 원래 스타일 저장
+        const scrollElements = container.querySelectorAll('#damage-stats-list, .damage-cards-container');
+        const originalStyles = [];
+        
+        scrollElements.forEach(el => {
+            originalStyles.push({
+                element: el,
+                overflow: el.style.overflow,
+                maxHeight: el.style.maxHeight,
+                height: el.style.height
+            });
+            // 전체 콘텐츠 표시
+            el.style.overflow = 'visible';
+            el.style.maxHeight = 'none';
+            el.style.height = 'auto';
         });
+        
+        // 잠시 대기
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const canvas = await html2canvas(container, {
+            backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-color') || '#0f0f0f',
+            scale: 2,
+            height: container.scrollHeight,
+            windowHeight: container.scrollHeight,
+            scrollX: 0,
+            scrollY: -window.scrollY
+        });
+        
+        // 원래 스타일로 복원
+        originalStyles.forEach(style => {
+            style.element.style.overflow = style.overflow;
+            style.element.style.maxHeight = style.maxHeight;
+            style.element.style.height = style.height;
+        });
+        
+        // 스크롤 위치 복원
+        window.scrollTo(0, originalScrollY);
         
         canvas.toBlob(blob => {
             const url = URL.createObjectURL(blob);
@@ -1363,68 +1975,293 @@ window.exportScreenshot = async () => {
         });
     } catch (err) {
         console.error('스크린샷 실패:', err);
+        // 에러 발생 시에도 스타일 복원
+        const scrollElements = container.querySelectorAll('#damage-stats-list, .damage-cards-container');
+        scrollElements.forEach(el => {
+            el.style.overflow = '';
+            el.style.maxHeight = '';
+            el.style.height = '';
+        });
     }
 };
 
-// CSV 내보내기
-window.exportCSV = () => {
-    const sorted = calcSortedItems();
-    const runtime = getRuntimeSec();
+
+// 클립보드에 이미지 복사
+window.copyToClipboard = async () => {
+    // 전체 컨테이너 찾기
+    const container = document.querySelector('.container');
+    if (!container) return;
     
-    let csv = 'Rank,Name,DPS,Total Damage,Damage Share,Critical Rate,Add Hit Rate\n';
+    // html2canvas 라이브러리 로드
+    if (!window.html2canvas) {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+        document.head.appendChild(script);
+        await new Promise(resolve => script.onload = resolve);
+    }
     
-    sorted.forEach(([user_id, item], idx) => {
-        const stat = item[""];
-        const total = stat.all.total_damage || 0;
-        const critRate = calcCritHitPercent(stat);
-        const addhitRate = calcAddHitPercent(stat);
-        const dps = Math.floor(total/(runtime+1));
-        const totalSum = sorted.reduce((sum, [uid,s]) => sum + (s[""].all.total_damage || 0), 0);
-        const share = ((total/totalSum)*100).toFixed(1);
-        const jobName = userData[user_id] ? userData[user_id].job : user_id;
+    try {
+        // 스크롤 위치 초기화
+        const originalScrollY = window.scrollY;
+        window.scrollTo(0, 0);
         
-        csv += `${idx+1},"${jobName}",${dps},${total},${share}%,${critRate}%,${addhitRate}%\n`;
-    });
-    
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `damage_report_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+        // 모든 스크롤 가능 영역의 원래 스타일 저장
+        const scrollElements = container.querySelectorAll('#damage-stats-list, .damage-cards-container');
+        const originalStyles = [];
+        
+        scrollElements.forEach(el => {
+            originalStyles.push({
+                element: el,
+                overflow: el.style.overflow,
+                maxHeight: el.style.maxHeight,
+                height: el.style.height
+            });
+            // 전체 콘텐츠 표시
+            el.style.overflow = 'visible';
+            el.style.maxHeight = 'none';
+            el.style.height = 'auto';
+        });
+        
+        // 잠시 대기
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const canvas = await html2canvas(container, {
+            backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-color') || '#0f0f0f',
+            scale: 2,
+            height: container.scrollHeight,
+            windowHeight: container.scrollHeight,
+            scrollX: 0,
+            scrollY: -window.scrollY
+        });
+        
+        // 원래 스타일로 복원
+        originalStyles.forEach(style => {
+            style.element.style.overflow = style.overflow;
+            style.element.style.maxHeight = style.maxHeight;
+            style.element.style.height = style.height;
+        });
+        
+        // 스크롤 위치 복원
+        window.scrollTo(0, originalScrollY);
+        
+        canvas.toBlob(async (blob) => {
+            try {
+                // 클립보드 API 사용 가능 여부 확인
+                if (navigator.clipboard && window.ClipboardItem) {
+                    await navigator.clipboard.write([
+                        new ClipboardItem({
+                            'image/png': blob
+                        })
+                    ]);
+                    alert('이미지가 클립보드에 복사되었습니다.');
+                } else {
+                    // 대체 방법: 다운로드로 안내
+                    console.log('클립보드 API가 지원되지 않아 다운로드합니다.');
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `mobi-meter-copy_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.png`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    alert('클립보드 복사가 지원되지 않아 이미지로 다운로드되었습니다.');
+                }
+            } catch (err) {
+                console.error('클립보드 복사 실패:', err);
+                // 실패 시 다운로드로 대체
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `mobi-meter-copy_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.png`;
+                a.click();
+                URL.revokeObjectURL(url);
+                alert('클립보드 복사 대신 이미지로 다운로드되었습니다.');
+            }
+        });
+    } catch (err) {
+        console.error('스크린샷 실패:', err);
+        alert('이미지 캡처에 실패했습니다.');
+        // 에러 발생 시에도 스타일 복원
+        const scrollElements = container.querySelectorAll('#damage-stats-list, .damage-cards-container');
+        scrollElements.forEach(el => {
+            el.style.overflow = '';
+            el.style.maxHeight = '';
+            el.style.height = '';
+        });
+    }
 };
 
-// 클립보드 복사 (Discord용)
-window.copyToClipboard = () => {
-    const sorted = calcSortedItems();
-    const runtime = getRuntimeSec();
-    const totalSum = sorted.reduce((sum, [uid,stat]) => sum + (stat[""].all.total_damage || 0), 0);
+// 모달 스크린샷 기능
+window.exportModalScreenshot = async () => {
+    const modal = document.querySelector('#detailModal .modal-content');
+    const modalBody = document.querySelector('#detailModal .modal-body');
+    if (!modal || !modalBody) return;
     
-    let text = `**전투 시간**: ${runtime.toFixed(2)}초\n`;
-    text += `**총 데미지**: ${totalSum.toLocaleString()}\n\n`;
-    text += `**DPS 순위**\n`;
+    // html2canvas 라이브러리 로드
+    if (!window.html2canvas) {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+        document.head.appendChild(script);
+        await new Promise(resolve => script.onload = resolve);
+    }
     
-    sorted.slice(0, 10).forEach(([user_id, item], idx) => {
-        const stat = item[""];
-        const total = stat.all.total_damage || 0;
-        const dps = Math.floor(total/(runtime+1));
-        const share = ((total/totalSum)*100).toFixed(1);
-        const jobName = userData[user_id] ? userData[user_id].job : user_id;
-        const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx+1}.`;
+    try {
+        // 현재 스타일 저장
+        const originalOverflow = modalBody.style.overflow;
+        const originalMaxHeight = modalBody.style.maxHeight;
+        const originalHeight = modalBody.style.height;
+        const originalModalMaxHeight = modal.style.maxHeight;
+        const originalModalHeight = modal.style.height;
         
-        text += `${medal} **${jobName}** - ${dps.toLocaleString()} DPS (${share}%)\n`;
-    });
+        // 스크롤 영역을 전체 표시로 변경
+        modalBody.style.overflow = 'visible';
+        modalBody.style.maxHeight = 'none';
+        modalBody.style.height = 'auto';
+        modal.style.maxHeight = 'none';
+        modal.style.height = 'auto';
+        
+        // 잠시 대기 (레이아웃 계산을 위해)
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // 전체 높이 계산
+        const fullHeight = modal.scrollHeight;
+        
+        // 모달 전체 캡처
+        const canvas = await html2canvas(modal, {
+            backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-soft'),
+            scale: 2,
+            scrollX: 0,
+            scrollY: 0,
+            useCORS: true,
+            logging: false,
+            width: modal.scrollWidth,
+            height: fullHeight,
+            windowWidth: modal.scrollWidth,
+            windowHeight: fullHeight
+        });
+        
+        // 스타일 원복
+        modalBody.style.overflow = originalOverflow;
+        modalBody.style.maxHeight = originalMaxHeight;
+        modalBody.style.height = originalHeight;
+        modal.style.maxHeight = originalModalMaxHeight;
+        modal.style.height = originalModalHeight;
+        
+        canvas.toBlob(blob => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `detail_stats_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.png`;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+    } catch (err) {
+        console.error('모달 스크린샷 실패:', err);
+        // 스타일 원복
+        modalBody.style.overflow = originalOverflow;
+        modalBody.style.maxHeight = originalMaxHeight;
+        modalBody.style.height = originalHeight;
+        modal.style.maxHeight = originalModalMaxHeight;
+        modal.style.height = originalModalHeight;
+    }
+};
+
+// 모달 클립보드 복사
+window.copyModalToClipboard = async () => {
+    const modal = document.querySelector('#detailModal .modal-content');
+    const modalBody = document.querySelector('#detailModal .modal-body');
+    if (!modal || !modalBody) return;
     
-    navigator.clipboard.writeText(text).then(() => {
-        // 복사 완료 알림
-        const btn = document.getElementById('exportBtn');
-        const originalHTML = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-check"></i> 복사됨!';
-        setTimeout(() => {
-            btn.innerHTML = originalHTML;
-        }, 2000);
-    });
+    // html2canvas 라이브러리 로드
+    if (!window.html2canvas) {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+        document.head.appendChild(script);
+        await new Promise(resolve => script.onload = resolve);
+    }
+    
+    try {
+        // 현재 스타일 저장
+        const originalOverflow = modalBody.style.overflow;
+        const originalMaxHeight = modalBody.style.maxHeight;
+        const originalHeight = modalBody.style.height;
+        const originalModalMaxHeight = modal.style.maxHeight;
+        const originalModalHeight = modal.style.height;
+        
+        // 스크롤 영역을 전체 표시로 변경
+        modalBody.style.overflow = 'visible';
+        modalBody.style.maxHeight = 'none';
+        modalBody.style.height = 'auto';
+        modal.style.maxHeight = 'none';
+        modal.style.height = 'auto';
+        
+        // 잠시 대기 (레이아웃 계산을 위해)
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // 전체 높이 계산
+        const fullHeight = modal.scrollHeight;
+        
+        const canvas = await html2canvas(modal, {
+            backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-soft'),
+            scale: 2,
+            scrollX: 0,
+            scrollY: 0,
+            useCORS: true,
+            logging: false,
+            width: modal.scrollWidth,
+            height: fullHeight,
+            windowWidth: modal.scrollWidth,
+            windowHeight: fullHeight
+        });
+        
+        // 스타일 원복
+        modalBody.style.overflow = originalOverflow;
+        modalBody.style.maxHeight = originalMaxHeight;
+        modalBody.style.height = originalHeight;
+        modal.style.maxHeight = originalModalMaxHeight;
+        modal.style.height = originalModalHeight;
+        
+        canvas.toBlob(async (blob) => {
+            try {
+                // 클립보드 API 사용 가능 여부 확인
+                if (navigator.clipboard && window.ClipboardItem) {
+                    await navigator.clipboard.write([
+                        new ClipboardItem({'image/png': blob})
+                    ]);
+                    console.log('모달 이미지가 클립보드에 복사되었습니다.');
+                    alert('클립보드에 이미지가 복사되었습니다!');
+                } else {
+                    // 대체 방법: 다운로드로 안내
+                    console.log('클립보드 API가 지원되지 않아 다운로드합니다.');
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `modal_copy_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.png`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    alert('클립보드 복사가 지원되지 않아 이미지로 다운로드되었습니다.');
+                }
+            } catch (clipboardErr) {
+                console.error('클립보드 API 실패:', clipboardErr);
+                // 실패 시 다운로드로 대체
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `modal_copy_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.png`;
+                a.click();
+                URL.revokeObjectURL(url);
+                alert('클립보드 복사 대신 이미지로 다운로드되었습니다.');
+            }
+        });
+    } catch (err) {
+        console.error('모달 클립보드 복사 실패:', err);
+        alert('클립보드 복사에 실패했습니다.');
+        // 스타일 원복
+        modalBody.style.overflow = originalOverflow;
+        modalBody.style.maxHeight = originalMaxHeight;
+        modalBody.style.height = originalHeight;
+        modal.style.maxHeight = originalModalMaxHeight;
+        modal.style.height = originalModalHeight;
+    }
 };
 
 setInterval(() => {
@@ -1436,19 +2273,19 @@ setInterval(() => {
 }, 500);
 
 // ========== WebSocket 연결 관리 ==========
-(function(){
-    let isConnected = false;
+// IIFE 제거하여 전역 스코프에서 새로운 UI 기능 접근 가능하도록 함
+let isWebSocketConnected = false;
 
-    // WebSocket 연결 상태 변경 핸들러
-    function onConnectionChanged(connected) {
-        isConnected = connected;
-        const ctrl = document.getElementById('connectSym');
-        if (connected) {
-            ctrl.classList.add("status-connected")
-        } else {
-            ctrl.classList.remove("status-connected")
-        }
+// WebSocket 연결 상태 변경 핸들러
+function onConnectionChanged(connected) {
+    isWebSocketConnected = connected;
+    const ctrl = document.getElementById('connectSym');
+    if (connected) {
+        ctrl.classList.add("status-connected")
+    } else {
+        ctrl.classList.remove("status-connected")
     }
+}
     document.getElementById('connectBtn').onclick = () => {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.close();
@@ -1503,15 +2340,16 @@ setInterval(() => {
                         if (render_timeout) return;
                         render_timeout = setTimeout(() => {
                             renderDamageRanks();
-                            // 차트 업데이트는 별도 타이머로 관리
+                            updateUserDpsHistory();  // DPS 히스토리 업데이트
+                            // 차트 업데이트는 별도 타이머로 관리 - 성능 최적화
                             if (!chartUpdateTimeout && isTabActive) {
                                 chartUpdateTimeout = setTimeout(() => {
                                     updateDPSChart();
                                     chartUpdateTimeout = null;
-                                }, 500); // 500ms 주기로 차트 업데이트
+                                }, 500); // 500ms로 조정 - 부드러운 실시간 업데이트
                             }
                             render_timeout = null;
-                        }, 100);    
+                        }, 200);  // 200ms로 렌더링 주기 증가 - 성능 최적화    
                         break;
                 }
             } catch (e) {
@@ -1533,9 +2371,25 @@ setInterval(() => {
     
     // DOM 로드 완료 후 이벤트 설정
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', setupEventListeners);
+        document.addEventListener('DOMContentLoaded', () => {
+            setupEventListeners();
+            // Chart.js 로딩 대기 후 초기화 준비
+            setTimeout(() => {
+                if (typeof Chart !== 'undefined' && window.ChartZoom) {
+                    Chart.register(window.ChartZoom);
+                    console.log('Chart.js zoom 플러그인 등록 완료');
+                }
+            }, 100);
+        });
     } else {
         setupEventListeners();
+        // Chart.js 로딩 대기 후 초기화 준비
+        setTimeout(() => {
+            if (typeof Chart !== 'undefined' && window.ChartZoom) {
+                Chart.register(window.ChartZoom);
+                console.log('Chart.js zoom 플러그인 등록 완료');
+            }
+        }, 100);
     }
     
     // ========== DOM 이벤트 리스너 설정 ==========
@@ -1558,8 +2412,11 @@ setInterval(() => {
             };
         }
         
-        // 토글 스위치 이벤트
+        // 토글 스위치 이벤트 - 다크모드 토글은 별도 처리하므로 제외
         document.querySelectorAll('.toggle-switch').forEach(toggle => {
+            // 다크모드 토글은 아래에서 별도로 처리
+            if (toggle.id === 'darkModeToggle') return;
+            
             toggle.onclick = () => {
                 toggle.classList.toggle('active');
                 
@@ -1652,14 +2509,26 @@ setInterval(() => {
         }
         
         // ===== 테마 및 UI 설정 이벤트 =====
-        // 테마 변경 (select 요소 사용)
-        const themeSelect = document.getElementById('themeSelect');
-        if (themeSelect) {
-            themeSelect.addEventListener('change', () => {
-                const selectedTheme = themeSelect.value;
-                document.body.setAttribute('data-theme', selectedTheme);
-                localStorage.setItem('theme', selectedTheme);
-            });
+        // 다크 모드 토글
+        const darkModeToggle = document.getElementById('darkModeToggle');
+        if (darkModeToggle) {
+            darkModeToggle.onclick = () => {
+                // 토글 상태 변경
+                darkModeToggle.classList.toggle('active');
+                
+                // 변경된 상태 확인
+                const isDarkMode = darkModeToggle.classList.contains('active');
+                
+                if (isDarkMode) {
+                    // 다크 모드 활성화
+                    document.body.removeAttribute('data-theme');
+                    localStorage.setItem('darkMode', 'true');
+                } else {
+                    // 라이트 모드 활성화
+                    document.body.setAttribute('data-theme', 'light');
+                    localStorage.setItem('darkMode', 'false');
+                }
+            };
         }
         
         // 뷰 모드 변경 (select 요소 사용)
@@ -1673,14 +2542,19 @@ setInterval(() => {
         }
         
         // 저장된 설정 복원
-        const savedTheme = localStorage.getItem('theme') || 'dark';
+        const savedDarkMode = localStorage.getItem('darkMode') !== 'false';
         const savedViewMode = localStorage.getItem('viewMode') || 'card';
         
-        // 테마 설정 복원
-        if (themeSelect) {
-            themeSelect.value = savedTheme;
+        // 다크 모드 설정 복원
+        if (darkModeToggle) {
+            if (savedDarkMode) {
+                darkModeToggle.classList.add('active');
+                document.body.removeAttribute('data-theme');
+            } else {
+                darkModeToggle.classList.remove('active');
+                document.body.setAttribute('data-theme', 'light');
+            }
         }
-        document.body.setAttribute('data-theme', savedTheme);
         
         // 뷰 모드 설정 복원
         if (viewModeSelect) {
@@ -1729,6 +2603,31 @@ setInterval(() => {
         }
     });
     
+    // 모달 외부 클릭 시 닫기
+    const detailModal = document.getElementById('detailModal');
+    if (detailModal) {
+        detailModal.addEventListener('click', (e) => {
+            if (e.target === detailModal) {
+                closeDetailModal();
+            }
+        });
+    }
+    
+    // 설정창 외부 클릭 시 닫기
+    const settingsPanel = document.getElementById('settingsPanel');
+    if (settingsPanel) {
+        // 설정창 외부 영역 클릭 감지를 위한 이벤트
+        document.addEventListener('click', (e) => {
+            if (settingsPanel.classList.contains('open')) {
+                // 설정 버튼과 설정 패널 내부가 아닌 경우 닫기
+                const settingsBtn = document.getElementById('settingsBtn');
+                if (!settingsPanel.contains(e.target) && e.target !== settingsBtn && !settingsBtn.contains(e.target)) {
+                    settingsPanel.classList.remove('open');
+                }
+            }
+        });
+    }
+    
     // 전투 시간 업데이트
     setInterval(() => {
         const combatTimeElement = document.getElementById('combatTime');
@@ -1739,4 +2638,3 @@ setInterval(() => {
             combatTimeElement.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         }
     }, 1000);
-})();
