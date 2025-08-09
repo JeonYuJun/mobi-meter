@@ -147,11 +147,4 @@
 - 관리자 권한으로 실행했는지 확인
 - settings.json의 인터페이스 설정 확인
 
-## 개발자 정보
-
-- **프로젝트**: Mobi-Meter
-- **대상 게임**: 마비노기 (한국 서버)
-- **라이센스**: 개인 사용 목적
-- **GitHub**: [https://github.com/JeonYuJun/mobi-meter](https://github.com/JeonYuJun/mobi-meter)
-
 ⚠️ **경고**: 이 도구는 교육 및 개인 분석 목적으로 제작되었습니다. 게임 이용약관을 확인하고 사용하시기 바랍니다.
