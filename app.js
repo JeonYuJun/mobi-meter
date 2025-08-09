@@ -1,5 +1,5 @@
 // ========== 전역 변수 및 초기 설정 ==========
-const wsUrl = "ws://localhost:8080";
+const wsUrl = "ws://localhost:6519";
 let ws;
 
 // 데미지 및 버프 데이터베이스
@@ -44,13 +44,13 @@ let autoResetTimeout = 60000;    // 기본 60초
 // DPS 차트 초기화
 function initDPSChart() {
     if (chartInitialized && dpsChart) {
-        console.log('차트가 이미 초기화되어 있습니다');
+        // console.log('차트가 이미 초기화되어 있습니다');
         return;
     }
     
     const canvas = document.getElementById('realtimeDPSChart');
     if (!canvas) {
-        console.error('차트 캔버스를 찾을 수 없습니다');
+        // console.error('차트 캔버스를 찾을 수 없습니다');
         // DOM이 완전히 로드되지 않았을 수 있으므로 다시 시도
         if (document.readyState !== 'complete') {
             setTimeout(initDPSChart, 100);
@@ -61,13 +61,13 @@ function initDPSChart() {
     // 차트 패널이 표시되어 있는지 확인
     const chartPanel = document.getElementById('chartPanel');
     if (!chartPanel || chartPanel.style.display === 'none') {
-        console.log('차트 패널이 숨겨져 있어 초기화를 건너뜁니다');
+        // console.log('차트 패널이 숨겨져 있어 초기화를 건너뜁니다');
         return;
     }
     
     // Chart.js가 로드되었는지 확인
     if (typeof Chart === 'undefined') {
-        console.error('Chart.js가 아직 로드되지 않았습니다');
+        // console.error('Chart.js가 아직 로드되지 않았습니다');
         setTimeout(initDPSChart, 100);
         return;
     }
@@ -80,7 +80,7 @@ function initDPSChart() {
     try {
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-            console.error('Canvas context를 가져올 수 없습니다');
+            // console.error('Canvas context를 가져올 수 없습니다');
             return;
         }
         
@@ -214,17 +214,16 @@ function initDPSChart() {
                         maxTicksLimit: 15,
                         callback: function(value, index, ticks) {
                             const totalPoints = this.chart.data.labels.length;
-                            // 데이터가 많을 때는 간격을 넓혀서 표시
-                            if (totalPoints > 300) {
-                                // 5분마다 표시
-                                return index % Math.ceil(totalPoints / 12) === 0 ? this.chart.data.labels[index] : '';
-                            } else if (totalPoints > 120) {
-                                // 2분마다 표시  
-                                return index % Math.ceil(totalPoints / 20) === 0 ? this.chart.data.labels[index] : '';
-                            } else {
-                                // 기본 표시
-                                return this.chart.data.labels[index];
+                            const label = this.chart.data.labels[index];
+                            
+                            // 레이블이 비어있지 않은 경우만 표시
+                            if (!label) return '';
+                            
+                            // 30초 단위로 표시 (6개 포인트마다, 5초 간격이므로)
+                            if (index % 6 === 0) {
+                                return label;
                             }
+                            return '';
                         }
                     }
                 },
@@ -255,17 +254,17 @@ function initDPSChart() {
         }
     });
         chartInitialized = true;
-        console.log('차트 초기화 성공');
+        // console.log('차트 초기화 성공');
         
         // 초기화 성공 후 빈 차트 표시
         dpsChart.update();
     } catch (error) {
-        console.error('차트 초기화 실패:', error);
+        // console.error('차트 초기화 실패:', error);
         chartInitialized = false;
         dpsChart = null;
         // 재시도 (더 긴 대기시간)
         setTimeout(() => {
-            console.log('차트 초기화 재시도...');
+            // console.log('차트 초기화 재시도...');
             initDPSChart();
         }, 1000);
     }
@@ -312,7 +311,7 @@ function initMiniDPSChart(uid) {
         try {
             miniChart.destroy();
         } catch (e) {
-            console.error('미니 차트 제거 중 오류:', e);
+            // console.error('미니 차트 제거 중 오류:', e);
         }
     }
     
@@ -463,7 +462,7 @@ function initMiniDPSChart(uid) {
         }
     });
     } catch (error) {
-        console.error('미니 차트 초기화 실패:', error);
+        // console.error('미니 차트 초기화 실패:', error);
         miniChart = null;
     }
 }
@@ -480,7 +479,7 @@ function updateDPSChart() {
     
     // 차트가 아직 초기화되지 않았고 데이터가 있으면 초기화
     if (!dpsChart || !chartInitialized) {
-        console.log('첫 데이터 수신, 차트 초기화 시작...');
+        // console.log('첫 데이터 수신, 차트 초기화 시작...');
         // 차트 토글이 활성화되어 있을 때만 차트 패널 표시
         const chartToggle = document.getElementById('chartToggle');
         const chartPanel = document.getElementById('chartPanel');
@@ -492,25 +491,17 @@ function updateDPSChart() {
         }
         return;
     }
-    // 데이터가 많을 때는 시간 형식 간소화
-    const currentTime = dpsChart.data.labels.length > 60 
-        ? new Date().toLocaleTimeString('ko-KR', { 
-            hour12: false, 
-            minute: '2-digit', 
-            second: '2-digit' 
-        })
-        : new Date().toLocaleTimeString('ko-KR', { 
-            hour12: false, 
-            hour: '2-digit', 
-            minute: '2-digit', 
-            second: '2-digit' 
-        });
+    // 전투 시간 계산 (5초마다 업데이트)
+    const combatSeconds = dpsChart.data.labels.length * 5;
+    const minutes = Math.floor(combatSeconds / 60);
+    const seconds = combatSeconds % 60;
+    const combatTime = `${minutes}:${seconds.toString().padStart(2, '0')}`;
     
     // 새로운 레이블 추가
     if (dpsChart.data.labels.length >= maxDataPoints) {
         dpsChart.data.labels.shift();
     }
-    dpsChart.data.labels.push(currentTime);
+    dpsChart.data.labels.push(combatTime);
     
     // 데이터셋 업데이트 또는 생성 - 더 구분 가능한 색상
     const colors = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#95E77E', '#B19CD9', '#FF9A8B', '#6C88C4', '#FFB347'];
@@ -523,7 +514,9 @@ function updateDPSChart() {
     // 기존 데이터셋 업데이트
     const newDatasets = top5.map(([user_id, item], idx) => {
         const total = item[""].all.total_damage || 0;
-        const dps = Math.floor(total / (getRuntimeSec() + 1));
+        // 첫 데이터일 때는 0으로 처리하여 이상값 방지
+        const runtime = getRuntimeSec();
+        const dps = (runtime > 0 && dpsChart.data.labels.length > 1) ? Math.floor(total / runtime) : 0;
         const jobName = userData[user_id] ? userData[user_id].job : user_id;
         const isSelf = selfID == user_id;
         
@@ -624,7 +617,7 @@ function resetChartZoom() {
         setTimeout(() => {
             if (dpsChart) {
                 dpsChart.isZooming = false;
-                console.log('차트 줌 초기화 완료 - 실시간 업데이트 재개');
+                // console.log('차트 줌 초기화 완료 - 실시간 업데이트 재개');
             }
         }, 300);
     }
@@ -661,6 +654,37 @@ function resetChartZoom() {
 })()
 
 // ========== 유틸리티 함수 ==========
+// 토스트 알림 표시 함수
+function showToast(message, type = 'success') {
+    // 기존 토스트 제거
+    const existingToast = document.querySelector('.toast-notification');
+    if (existingToast) {
+        existingToast.remove();
+    }
+    
+    // 토스트 생성
+    const toast = document.createElement('div');
+    toast.className = `toast-notification ${type}`;
+    
+    // 아이콘 설정
+    const icon = type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle';
+    
+    toast.innerHTML = `
+        <i class="fas ${icon}"></i>
+        <span>${message}</span>
+    `;
+    
+    document.body.appendChild(toast);
+    
+    // 2초 후 사라지기
+    setTimeout(() => {
+        toast.style.animation = 'toastFadeOut 0.3s ease forwards';
+        setTimeout(() => {
+            toast.remove();
+        }, 300);
+    }, 2000);
+}
+
 // 현재 타겟 ID 가져오기 (보스모드에 따라)
 function getTargetID(){
     if (bossMode == "all"){
@@ -723,12 +747,24 @@ function closeDetailModal() {
     if (detailModal) {
         detailModal.classList.remove('open');
     }
+    
+    // 스킬 선택 상태 완전 초기화
+    if (selectedDetailUserId) {
+        selectedDetailSkillName[selectedDetailUserId] = null;
+        // 현재 사용자의 모든 스킬 상세 열림 상태 초기화
+        Object.keys(skillDetailOpened).forEach(skillId => {
+            if (skillId.startsWith(selectedDetailUserId + '_')) {
+                skillDetailOpened[skillId] = false;
+            }
+        });
+    }
+    
     // 미니 차트 제거
     if (miniChart) {
         try {
             miniChart.destroy();
         } catch (e) {
-            console.error('미니 차트 제거 중 오류:', e);
+            // console.error('미니 차트 제거 중 오류:', e);
         }
         miniChart = null;
     }
@@ -739,13 +775,39 @@ function showDetailModal(uid) {
     const modalBody = document.getElementById('modalBody');
     const modalTitle = document.getElementById('modalTitle');
     
+    // 스킬 선택 상태 초기화 (모달을 열 때마다 초기화)
+    selectedDetailSkillName[uid] = null;
+    Object.keys(skillDetailOpened).forEach(skillId => {
+        if (skillId.startsWith(uid + '_')) {
+            skillDetailOpened[skillId] = false;
+        }
+    });
+    
     const tid = getTargetID();
     const db = singleMode ? damageDB2 : damageDB;
     
     if (!db[uid] || !db[uid][tid]) return;
     
     const jobName = userData[uid] ? userData[uid].job : uid;
-    modalTitle.textContent = `${jobName} 상세 정보`;
+    
+    // 순위 계산
+    const sorted = calcSortedItems();
+    const rank = sorted.findIndex(([id, item]) => id === uid) + 1;
+    
+    // 모달 헤더를 더 보기 좋게 표시
+    modalTitle.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="background: var(--primary-color); color: #000; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 0.9em;">
+                ${rank}위
+            </span>
+            <span style="color: var(--text-color); font-weight: 600;">
+                ${jobName}
+            </span>
+            <span style="color: var(--text-dim); font-size: 0.85em; font-weight: normal;">
+                전투 상세
+            </span>
+        </div>
+    `;
     
     // 모달 내용 구성
     modalBody.innerHTML = '';
@@ -789,12 +851,12 @@ function showDetailModal(uid) {
                 <div style="font-weight: 600;">스킬명</div>
                 <div style="text-align: left; font-weight: 600;">데미지 (점유율)</div>
                 <div style="text-align: center;" class="tooltip">
-                    평균 공증
-                    <span class="tooltip-text">스킬 사용 시 평균 공격력 증가</span>
+                    공격증가
+                    <span class="tooltip-text">버프로 인한 공격력 증가</span>
                 </div>
                 <div style="text-align: center;" class="tooltip">
-                    평균 피증
-                    <span class="tooltip-text">스킬 사용 시 평균 피해 증가</span>
+                    피해증가
+                    <span class="tooltip-text">버프로 인한 데미지 증가</span>
                 </div>
                 <div style="text-align: center;" class="tooltip">
                     크리율
@@ -846,28 +908,37 @@ function renderDetailStats(uid, container) {
     const skill = selectedDetailSkillName[uid] ?? "";
     const db = singleMode ? damageDB2[uid][tid][skill] : damageDB[uid][tid][skill];
     
-    // 전투 데이터 계산
-    const totalDamage = db.all.total_damage || 0;
+    // 전투 데이터 계산 - 전체 통계는 "" 스킬에서 가져와야 함
+    const totalDb = singleMode ? damageDB2[uid][tid][""] : damageDB[uid][tid][""];
+    const totalDamage = skill === "" ? (db.all.total_damage || 0) : (totalDb.all.total_damage || 0);
     const combatTime = getRuntimeSec();
     const dps = combatTime > 0 ? Math.floor(totalDamage / combatTime) : 0;
+    
+    // 새로운 통계 데이터 (슬라이딩 DPS, 버프 공격력/데미지)
+    const stats = window.globalStats?.[uid] || {};
+    const slidingDps = stats.sliding_dps || dps;
+    const avgDamageMultiplier = stats.avg_damage_multiplier || 100;
+    const avgDamageReceived = stats.avg_damage_received || 100;
     
     // 전체 대미지 중 비율 계산
     const sorted = calcSortedItems();
     const totalSum = sorted.reduce((sum, [uid,stat]) => sum + (stat[""].all.total_damage || 0), 0);
     const damageRate = totalSum > 0 ? ((totalDamage / totalSum) * 100).toFixed(1) : 0;
     
-    // 타격 횟수 계산
+    // 타격 횟수 계산 - 스킬별 데이터 사용
     const totalHits = (db.normal.total_count || 0) + (db.special.total_count || 0) + (db.dot.total_count || 0);
     
-    // 각종 확률 계산
+    // 각종 확률 계산 - 스킬별 데이터 사용
     const critRate = calcCritHitPercent(db);
     const addhitRate = calcAddHitPercent(db);
-    const powerRate = totalHits > 0 ? ((db.normal.power_count + db.special.power_count) / totalHits * 100).toFixed(1) : 0;
-    const fastRate = totalHits > 0 ? ((db.normal.fast_count + db.special.fast_count) / totalHits * 100).toFixed(1) : 0;
+    // 강타율과 연타율은 normal과 special 공격에서만 계산 (dot 제외)
+    const normalSpecialHits = (db.normal.total_count || 0) + (db.special.total_count || 0);
+    const powerRate = normalSpecialHits > 0 ? ((db.normal.power_count + db.special.power_count) / normalSpecialHits * 100).toFixed(1) : 0;
+    const fastRate = normalSpecialHits > 0 ? ((db.normal.fast_count + db.special.fast_count) / normalSpecialHits * 100).toFixed(1) : 0;
     
-    // 버프 데이터
-    const atkbuff = divideForDis(db.buff.total_atk, db.buff.total_count);
-    const dmgbuff = divideForDis(db.buff.total_dmg, db.buff.total_count);
+    // 버프 데이터는 전체 통계에서 가져와야 함
+    const atkbuff = totalDb.buff.total_count > 0 ? (totalDb.buff.total_atk / totalDb.buff.total_count).toFixed(1) : 0;
+    const dmgbuff = totalDb.buff.total_count > 0 ? (totalDb.buff.total_dmg / totalDb.buff.total_count).toFixed(1) : 0;
     
     // 기존 통계 섹션 제거
     const existingStats = container.querySelector('.modal-stats-container');
@@ -879,12 +950,12 @@ function renderDetailStats(uid, container) {
         <div class="modal-stats-container" style="margin-top: 12px;">
             <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
                 <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
-                    <div style="font-size: 0.7em; color: var(--text-dim);">총 데미지</div>
-                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; word-break: break-all; margin-top: 8px;">${totalDamage.toLocaleString()}</div>
+                    <div style="font-size: 0.7em; color: var(--text-dim);">${skill ? '스킬 데미지' : '총 데미지'}</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; word-break: break-all; margin-top: 8px;">${skill ? (db.all.total_damage || 0).toLocaleString() : totalDamage.toLocaleString()}</div>
                 </div>
                 <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
                     <div style="font-size: 0.7em; color: var(--text-dim);">DPS</div>
-                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; word-break: break-all; margin-top: 8px;">${dps.toLocaleString()}</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #4CAF50; word-break: break-all; margin-top: 8px;">${dps.toLocaleString()}</div>
                 </div>
                 <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
                     <div style="font-size: 0.7em; color: var(--text-dim);">데미지 비율</div>
@@ -915,11 +986,11 @@ function renderDetailStats(uid, container) {
                     <div style="font-size: 0.95em; font-weight: 600; color: #00c896; margin-top: 8px;">${fastRate}%</div>
                 </div>
                 <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
-                    <div style="font-size: 0.7em; color: var(--text-dim);">평균 공증</div>
+                    <div style="font-size: 0.7em; color: var(--text-dim);">공격증가</div>
                     <div style="font-size: 0.95em; font-weight: 600; color: #00c896; margin-top: 8px;">${atkbuff}%</div>
                 </div>
                 <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
-                    <div style="font-size: 0.7em; color: var(--text-dim);">평균 피증</div>
+                    <div style="font-size: 0.7em; color: var(--text-dim);">피해증가</div>
                     <div style="font-size: 0.95em; font-weight: 600; color: #00c896; margin-top: 8px;">${dmgbuff}%</div>
                 </div>
             </div>
@@ -934,7 +1005,9 @@ function renderDetailBuffs(uid, container) {
     const tid = getTargetID();
     const skill = selectedDetailSkillName[uid] ?? "";
     const db = singleMode ? damageDB2[uid][tid][skill] : damageDB[uid][tid][skill];
-    const buffs = buffDB[uid] ? buffDB[uid][tid][skill] : {};
+    // 버프는 항상 전체 데이터("")를 사용해야 함
+    const totalDb = singleMode ? damageDB2[uid][tid][""] : damageDB[uid][tid][""];
+    const buffs = buffDB[uid] ? buffDB[uid][tid][""] : {};
     
     const types = {"룬":1, "스킬":11, "시너지":12, "적":21, "펫":31};
     const colors = {1:"E68A2E", 11:"2E7DD9", 12:"36CC6D", 21:"A05ED9", 31:"E65A9C"};
@@ -942,13 +1015,28 @@ function renderDetailBuffs(uid, container) {
     
     // 버프를 타입별로 그룹화
     const buffsByType = {};
+    const stats = window.globalStats?.[uid] || {};
+    const buffStats = stats.buff_stats || {};
+    
     for (const [key, value] of Object.entries(buffs)) {
         const type = value.type;
         if (!buffsByType[type]) buffsByType[type] = [];
-        // 가동률 = (total_stack / max_stack) / 총공격횟수
-        // total_stack은 버프가 켜진 상태에서 공격한 횟수 (스택 무관하게 1씩 증가)
-        const uptime = calcPercent(value.total_stack, db.normal.total_count + db.special.total_count);
-        buffsByType[type].push({name: key, uptime, maxStack: value.max_stack, color: colors[type]});
+        
+        // 버프 가동률 계산 수정 - 전체 데이터 기준으로 계산
+        const buffStat = buffStats[key] || {};
+        const totalHits = totalDb.normal.total_count + totalDb.special.total_count;
+        // total_count가 버프 활성 횟수, 전체 공격 횟수로 나누어 가동률 계산
+        const uptime = buffStat.uptime || (value.total_count > 0 && totalHits > 0 ? calcPercent(value.total_count, totalHits) : 0);
+        // 평균 스택은 총 스택 / 활성 횟수
+        const avgStack = buffStat.avg_stack || (value.total_count > 0 ? (value.total_stack / value.total_count).toFixed(1) : value.max_stack);
+        
+        buffsByType[type].push({
+            name: key, 
+            uptime: typeof uptime === 'number' ? uptime.toFixed(1) : uptime,
+            maxStack: value.max_stack,
+            avgStack: typeof avgStack === 'number' ? avgStack.toFixed(1) : avgStack,
+            color: colors[type]
+        });
     }
     
     // 탭 네비게이션 생성
@@ -975,7 +1063,7 @@ function renderDetailBuffs(uid, container) {
                     <div class="circle" style="width: 12px; height: 12px; border-radius: 50%; background:#${buff.color}; margin-right: 12px; flex-shrink: 0;"></div>
                     <div style="flex: 1; overflow: hidden;">
                         <div style="font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${buff.name}</div>
-                        <div style="font-size: 0.85em; color: var(--text-dim);">가동률: ${buff.uptime}% / 최대: ${buff.maxStack}</div>
+                        <div style="font-size: 0.85em; color: var(--text-dim);">가동률: ${buff.uptime}% / 평균: ${buff.avgStack} / 최대: ${buff.maxStack}</div>
                     </div>
                     <div style="margin-left: 12px; font-weight: 600; color: #${buff.color};">${buff.uptime}%</div>
                 </div>
@@ -1036,9 +1124,9 @@ function renderDetailTitle(uid){
             const total = stat.all.total_damage || 0;
             const critRate   = calcCritHitPercent(stat);
             const addhitRate = calcAddHitPercent(stat);
-            const atkbuff    = divideForDis(stat.buff.total_atk, stat.buff.total_count);
-            const dmgbuff    = divideForDis(stat.buff.total_dmg, stat.buff.total_count);
-            const dps        = Math.floor(total/(getRuntimeSec()+1));
+            const atkbuff    = stat.buff.total_count > 0 ? (stat.buff.total_atk / stat.buff.total_count).toFixed(1) : 0;
+            const dmgbuff    = stat.buff.total_count > 0 ? (stat.buff.total_dmg / stat.buff.total_count).toFixed(1) : 0;
+            const dps        = getRuntimeSec() > 0 ? Math.floor(total / getRuntimeSec()) : 0;
             const totalRate = sorted.length === 1 ? 1 : totalSum > 0 ? total / totalSum : 0
             const jobName =  userData[user_id] ? userData[user_id].job : user_id;
             const isSelf = selfID == user_id;
@@ -1055,15 +1143,15 @@ function renderDetail(uid) {
     const rank = calcSortedItems().findIndex(([id, item]) => id === uid);
     const critRate  = calcCritHitPercent(db);
     const addhitRate = calcAddHitPercent(db);
-    const atkbuff = divideForDis(db.buff.total_atk, db.buff.total_count);
-    const dmgbuff = divideForDis(db.buff.total_dmg, db.buff.total_count);
+    const atkbuff = db.buff.total_count > 0 ? (db.buff.total_atk / db.buff.total_count).toFixed(1) : 0;
+    const dmgbuff = db.buff.total_count > 0 ? (db.buff.total_dmg / db.buff.total_count).toFixed(1) : 0;
     
     // 모든 detail-value span을 가져오기
     const values = document.querySelectorAll('#stat-detail-panel .detail-value');
     values[0].textContent = `${critRate}%`; 
     values[1].textContent = `${addhitRate}%`; 
-    values[2].textContent = `${atkbuff}`;
-    values[3].textContent = `${dmgbuff}`;
+    values[2].textContent = `${atkbuff}%`;
+    values[3].textContent = `${dmgbuff}%`;
     
 
     const buffList = document.querySelectorAll('#stat-detail-panel .buff-list')[0];
@@ -1125,8 +1213,8 @@ function renderSkillDetail(uid, container) {
                 total: skillObj.all.total_damage,
                 crit: calcCritHitPercent(skillObj),
                 addhit: calcAddHitPercent(skillObj),
-                atk: divideForDis(skillObj.buff.total_atk, skillObj.buff.total_count),
-                dmg: divideForDis(skillObj.buff.total_dmg, skillObj.buff.total_count),
+                atk: skillObj.buff.total_count > 0 ? (skillObj.buff.total_atk / skillObj.buff.total_count).toFixed(1) : 0,
+                dmg: skillObj.buff.total_count > 0 ? (skillObj.buff.total_dmg / skillObj.buff.total_count).toFixed(1) : 0,
             }
             
             // 스킬별 버프 데이터 가져오기
@@ -1135,7 +1223,8 @@ function renderSkillDetail(uid, container) {
             const colors = {1:"E68A2E", 11:"2E7DD9", 12:"36CC6D", 21:"A05ED9", 31:"E65A9C"};
             
             for (const [buffName, buffData] of Object.entries(skillBuffs)) {
-                const uptime = calcPercent(buffData.total_stack, normal.total_count + special.total_count);
+                // 버프 가동률은 버프 활성 횟수를 타격수로 나눔 (스택이 아닌 횟수 기준)
+                const uptime = calcPercent(buffData.total_count, normal.total_count + special.total_count);
                 if (uptime > 0) {
                     buffList.push({
                         name: buffName,
@@ -1189,6 +1278,7 @@ function renderSkillDetail(uid, container) {
                 <div>일반 데미지</div>
                 <div><span>타수</span><span>${row.normal.total_count.toLocaleString()}</span></div>
                 <div><span>총합</span><span>${row.normal.total_damage.toLocaleString()} (${calcPercent(row.normal.total_damage,row.detail.total)}%)</span></div>
+                <div><span>평균</span><span>${row.normal.total_count > 0 ? Math.floor(row.normal.total_damage / row.normal.total_count).toLocaleString() : '0'}</span></div>
                 <div><span>최대</span><span>${row.normal.max_damage.toLocaleString()}</span></div>
                 <div><span>최소</span><span>${row.normal.min_damage.toLocaleString()}</span></div>
                 <div><span>강타율</span><span>${calcPercent(row.normal.power_count, row.normal.total_count)}%</span></div>
@@ -1199,6 +1289,7 @@ function renderSkillDetail(uid, container) {
                 <div>도트 데미지</div>
                 <div><span>타수</span><span>${row.dot.total_count.toLocaleString()}</span></div>
                 <div><span>총합</span><span>${row.dot.total_damage.toLocaleString()} (${calcPercent(row.dot.total_damage,row.detail.total)}%)</span></div>
+                <div><span>평균</span><span>${row.dot.total_count > 0 ? Math.floor(row.dot.total_damage / row.dot.total_count).toLocaleString() : '0'}</span></div>
                 <div><span>최대</span><span>${row.dot.max_damage.toLocaleString()}</span></div>
                 <div><span>최소</span><span>${row.dot.min_damage.toLocaleString()}</span></div>
                 <div><span>강타율</span><span>${calcPercent(row.dot.power_count, row.dot.total_count)}%</span></div>
@@ -1209,6 +1300,7 @@ function renderSkillDetail(uid, container) {
                 <div>특수 데미지</div>
                 <div><span>타수</span><span>${row.special.total_count.toLocaleString()}</span></div>
                 <div><span>총합</span><span>${row.special.total_damage.toLocaleString()} (${calcPercent(row.special.total_damage,row.detail.total)}%)</span></div>
+                <div><span>평균</span><span>${row.special.total_count > 0 ? Math.floor(row.special.total_damage / row.special.total_count).toLocaleString() : '0'}</span></div>
                 <div><span>최대</span><span>${row.special.max_damage.toLocaleString()}</span></div>
                 <div><span>최소</span><span>${row.special.min_damage.toLocaleString()}</span></div>
                 <div><span>강타율</span><span>${calcPercent(row.special.power_count,row.special.total_count)}%</span></div>
@@ -1276,10 +1368,10 @@ function rankItem(rank, isSelf, jobName, total, totalRate, dps, critRate, addhit
     addhitSpan.textContent = `추가타: ${addhitRate}%`;
     const atkSpan = document.createElement('span');
     atkSpan.className = 'rank-sub';
-    atkSpan.textContent = `공증: ${atk}`;
+    atkSpan.textContent = `공격증가: ${atk}%`;
     const dmgSpan = document.createElement('span');
     dmgSpan.className = 'rank-sub';
-    dmgSpan.textContent = `피증: ${dmg}`;
+    dmgSpan.textContent = `피해증가: ${dmg}%`;
 
     // 퍼센트 라벨(선택)
     const percentLabel = document.createElement('span');
@@ -1383,7 +1475,12 @@ function renderCardView(sorted, totalSum) {
         const total = stat.all.total_damage || 0;
         const critRate = calcCritHitPercent(stat);
         const addhitRate = calcAddHitPercent(stat);
-        const dps = Math.floor(total/(getRuntimeSec()+1));
+        const dps = getRuntimeSec() > 0 ? Math.floor(total / getRuntimeSec()) : 0;
+        
+        // 새로운 통계 데이터 가져오기
+        const stats = window.globalStats?.[user_id] || {};
+        const slidingDps = stats.sliding_dps || dps;
+        
         const totalRate = sorted.length === 1 ? 1 : totalSum > 0 ? total / totalSum : 0;
         const jobName = userData[user_id] ? userData[user_id].job : user_id;
         const isSelf = selfID == user_id;
@@ -1460,8 +1557,8 @@ function renderCardView(sorted, totalSum) {
             <div>점유율</div>
             <div class="list-stat">크리율</div>
             <div class="list-stat">추가타</div>
-            <div class="list-stat">공증</div>
-            <div class="list-stat">피증</div>
+            <div class="list-stat">공격증가</div>
+            <div class="list-stat">피해증가</div>
         `;
         listContainer.appendChild(header);
         
@@ -1472,9 +1569,16 @@ function renderCardView(sorted, totalSum) {
             const total = stat.all.total_damage || 0;
             const critRate = calcCritHitPercent(stat);
             const addhitRate = calcAddHitPercent(stat);
-            const atkbuff = divideForDis(stat.buff.total_atk, stat.buff.total_count);
-            const dmgbuff = divideForDis(stat.buff.total_dmg, stat.buff.total_count);
-            const dps = Math.floor(total/(getRuntimeSec()+1));
+            const atkbuff = stat.buff.total_count > 0 ? (stat.buff.total_atk / stat.buff.total_count).toFixed(1) : 0;
+            const dmgbuff = stat.buff.total_count > 0 ? (stat.buff.total_dmg / stat.buff.total_count).toFixed(1) : 0;
+            const dps = getRuntimeSec() > 0 ? Math.floor(total / getRuntimeSec()) : 0;
+            
+            // 새로운 통계 데이터는 참고만
+            const stats = window.globalStats?.[user_id] || {};
+            const slidingDps = stats.sliding_dps || 0;
+            const avgDmgMultiplier = stats.avg_damage_multiplier || 100;
+            const avgDmgReceived = stats.avg_damage_received || 100;
+            
             const totalRate = sorted.length === 1 ? 1 : totalSum > 0 ? total / totalSum : 0;
             const jobName = userData[user_id] ? userData[user_id].job : user_id;
             const isSelf = selfID == user_id;
@@ -1497,8 +1601,8 @@ function renderCardView(sorted, totalSum) {
                 <div class="list-share">${(totalRate * 100).toFixed(1)}%</div>
                 <div class="list-stat">${critRate}%</div>
                 <div class="list-stat">${addhitRate}%</div>
-                <div class="list-stat">${atkbuff}</div>
-                <div class="list-stat">${dmgbuff}</div>
+                <div class="list-stat">${atkbuff}%</div>
+                <div class="list-stat">${dmgbuff}%</div>
             `;
             
             listContainer.appendChild(listItem);
@@ -1522,11 +1626,11 @@ function renderListView(sorted, totalSum) {
     header.innerHTML = `
         <div class="list-rank">순위</div>
         <div>직업</div>
-        <div>DPS</div>
-        <div>총 데미지</div>
-        <div>점유율</div>
-        <div class="list-stat">크리율</div>
-        <div class="list-stat">추가타</div>
+        <div style="text-align: center;">DPS</div>
+        <div style="text-align: center;">총 데미지</div>
+        <div style="text-align: center;">점유율</div>
+        <div class="list-stat">크리</div>
+        <div class="list-stat">추타</div>
         <div class="list-stat">공증</div>
         <div class="list-stat">피증</div>
     `;
@@ -1537,9 +1641,16 @@ function renderListView(sorted, totalSum) {
         const total = stat.all.total_damage || 0;
         const critRate = calcCritHitPercent(stat);
         const addhitRate = calcAddHitPercent(stat);
-        const atkbuff = divideForDis(stat.buff.total_atk, stat.buff.total_count);
-        const dmgbuff = divideForDis(stat.buff.total_dmg, stat.buff.total_count);
-        const dps = Math.floor(total/(getRuntimeSec()+1));
+        const atkbuff = stat.buff.total_count > 0 ? (stat.buff.total_atk / stat.buff.total_count).toFixed(1) : 0;
+        const dmgbuff = stat.buff.total_count > 0 ? (stat.buff.total_dmg / stat.buff.total_count).toFixed(1) : 0;
+        const dps = getRuntimeSec() > 0 ? Math.floor(total / getRuntimeSec()) : 0;
+        
+        // 새로운 통계 데이터는 참고만
+        const stats = window.globalStats?.[user_id] || {};
+        const slidingDps = stats.sliding_dps || 0;
+        const avgDmgMultiplier = stats.avg_damage_multiplier || 100;
+        const avgDmgReceived = stats.avg_damage_received || 100;
+        
         const totalRate = sorted.length === 1 ? 1 : totalSum > 0 ? total / totalSum : 0;
         const jobName = userData[user_id] ? userData[user_id].job : user_id;
         const isSelf = selfID == user_id;
@@ -1572,8 +1683,8 @@ function renderListView(sorted, totalSum) {
             <div class="list-share">${(totalRate * 100).toFixed(1)}%</div>
             <div class="list-stat">${critRate}%</div>
             <div class="list-stat">${addhitRate}%</div>
-            <div class="list-stat">${atkbuff}</div>
-            <div class="list-stat">${dmgbuff}</div>
+            <div class="list-stat">${atkbuff}%</div>
+            <div class="list-stat">${dmgbuff}%</div>
         `;
         
         // 클릭 이벤트
@@ -1643,7 +1754,7 @@ function clearDB () {
         try {
             dpsChart.destroy();
         } catch (e) {
-            console.error('차트 제거 중 오류:', e);
+            // console.error('차트 제거 중 오류:', e);
         }
         dpsChart = null;
     }
@@ -1652,7 +1763,7 @@ function clearDB () {
         try {
             miniChart.destroy();
         } catch (e) {
-            console.error('미니 차트 제거 중 오류:', e);
+            // console.error('미니 차트 제거 중 오류:', e);
         }
         miniChart = null;
     }
@@ -1699,7 +1810,7 @@ function clearDB () {
     // 마지막 데이터 시간 리셋
     lastDataTime = Date.now();
     
-    console.log('모든 데이터가 초기화되었습니다.');
+    // console.log('모든 데이터가 초기화되었습니다.');
 }
 
 // 자동 초기화 체크 함수
@@ -1711,7 +1822,7 @@ function checkAutoReset() {
     // 설정된 시간 이상 데이터가 없고, 데이터가 있는 경우에만
     if (timeSinceLastData >= autoResetTimeout && getTotalDamage() > 0) {
         // 자동 초기화 실행 (알림 없이)
-        console.log(`자동 초기화: ${autoResetTimeout/1000}초 동안 데이터 없음`);
+        // console.log(`자동 초기화: ${autoResetTimeout/1000}초 동안 데이터 없음`);
         clearDB();
         renderDamageRanks();
     }
@@ -1918,7 +2029,14 @@ window.exportScreenshot = async () => {
         const script = document.createElement('script');
         script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
         document.head.appendChild(script);
-        await new Promise(resolve => script.onload = resolve);
+        await new Promise((resolve, reject) => {
+            script.onload = resolve;
+            script.onerror = () => reject(new Error('Failed to load html2canvas'));
+            setTimeout(() => reject(new Error('Script load timeout')), 5000);
+        }).catch(err => {
+            showToast('이미지 캡처 라이브러리 로드 실패', 'error');
+            return;
+        });
     }
     
     try {
@@ -1974,7 +2092,7 @@ window.exportScreenshot = async () => {
             URL.revokeObjectURL(url);
         });
     } catch (err) {
-        console.error('스크린샷 실패:', err);
+        // console.error('스크린샷 실패:', err);
         // 에러 발생 시에도 스타일 복원
         const scrollElements = container.querySelectorAll('#damage-stats-list, .damage-cards-container');
         scrollElements.forEach(el => {
@@ -1997,7 +2115,14 @@ window.copyToClipboard = async () => {
         const script = document.createElement('script');
         script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
         document.head.appendChild(script);
-        await new Promise(resolve => script.onload = resolve);
+        await new Promise((resolve, reject) => {
+            script.onload = resolve;
+            script.onerror = () => reject(new Error('Failed to load html2canvas'));
+            setTimeout(() => reject(new Error('Script load timeout')), 5000);
+        }).catch(err => {
+            showToast('이미지 캡처 라이브러리 로드 실패', 'error');
+            throw err;
+        });
     }
     
     try {
@@ -2053,20 +2178,20 @@ window.copyToClipboard = async () => {
                             'image/png': blob
                         })
                     ]);
-                    alert('이미지가 클립보드에 복사되었습니다.');
+                    showToast('이미지가 클립보드에 복사되었습니다!', 'success');
                 } else {
                     // 대체 방법: 다운로드로 안내
-                    console.log('클립보드 API가 지원되지 않아 다운로드합니다.');
+                    // console.log('클립보드 API가 지원되지 않아 다운로드합니다.');
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
                     a.download = `mobi-meter-copy_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.png`;
                     a.click();
                     URL.revokeObjectURL(url);
-                    alert('클립보드 복사가 지원되지 않아 이미지로 다운로드되었습니다.');
+                    showToast('클립보드 복사가 지원되지 않아 이미지로 다운로드되었습니다.', 'error');
                 }
             } catch (err) {
-                console.error('클립보드 복사 실패:', err);
+                // console.error('클립보드 복사 실패:', err);
                 // 실패 시 다운로드로 대체
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -2074,12 +2199,12 @@ window.copyToClipboard = async () => {
                 a.download = `mobi-meter-copy_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.png`;
                 a.click();
                 URL.revokeObjectURL(url);
-                alert('클립보드 복사 대신 이미지로 다운로드되었습니다.');
+                showToast('클립보드 복사 대신 이미지로 다운로드되었습니다.', 'error');
             }
         });
     } catch (err) {
-        console.error('스크린샷 실패:', err);
-        alert('이미지 캡처에 실패했습니다.');
+        // console.error('스크린샷 실패:', err);
+        showToast('이미지 캡처에 실패했습니다.', 'error');
         // 에러 발생 시에도 스타일 복원
         const scrollElements = container.querySelectorAll('#damage-stats-list, .damage-cards-container');
         scrollElements.forEach(el => {
@@ -2101,16 +2226,23 @@ window.exportModalScreenshot = async () => {
         const script = document.createElement('script');
         script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
         document.head.appendChild(script);
-        await new Promise(resolve => script.onload = resolve);
+        await new Promise((resolve, reject) => {
+            script.onload = resolve;
+            script.onerror = () => reject(new Error('Failed to load html2canvas'));
+            setTimeout(() => reject(new Error('Script load timeout')), 5000);
+        }).catch(err => {
+            showToast('이미지 캡처 라이브러리 로드 실패', 'error');
+            return;
+        });
     }
     
     try {
         // 현재 스타일 저장
-        const originalOverflow = modalBody.style.overflow;
-        const originalMaxHeight = modalBody.style.maxHeight;
-        const originalHeight = modalBody.style.height;
-        const originalModalMaxHeight = modal.style.maxHeight;
-        const originalModalHeight = modal.style.height;
+        const originalOverflow = modalBody.style.overflow || '';
+        const originalMaxHeight = modalBody.style.maxHeight || '';
+        const originalHeight = modalBody.style.height || '';
+        const originalModalMaxHeight = modal.style.maxHeight || '';
+        const originalModalHeight = modal.style.height || '';
         
         // 스크롤 영역을 전체 표시로 변경
         modalBody.style.overflow = 'visible';
@@ -2155,7 +2287,7 @@ window.exportModalScreenshot = async () => {
             URL.revokeObjectURL(url);
         });
     } catch (err) {
-        console.error('모달 스크린샷 실패:', err);
+        // console.error('모달 스크린샷 실패:', err);
         // 스타일 원복
         modalBody.style.overflow = originalOverflow;
         modalBody.style.maxHeight = originalMaxHeight;
@@ -2176,16 +2308,24 @@ window.copyModalToClipboard = async () => {
         const script = document.createElement('script');
         script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
         document.head.appendChild(script);
-        await new Promise(resolve => script.onload = resolve);
+        await new Promise((resolve, reject) => {
+            script.onload = resolve;
+            script.onerror = () => reject(new Error('Failed to load html2canvas'));
+            setTimeout(() => reject(new Error('Script load timeout')), 5000);
+        }).catch(err => {
+            showToast('이미지 캡처 라이브러리 로드 실패', 'error');
+            throw err;
+        });
     }
     
+    // 현재 스타일 저장 (try 블록 밖에서 선언)
+    const originalOverflow = modalBody.style.overflow || '';
+    const originalMaxHeight = modalBody.style.maxHeight || '';
+    const originalHeight = modalBody.style.height || '';
+    const originalModalMaxHeight = modal.style.maxHeight || '';
+    const originalModalHeight = modal.style.height || '';
+    
     try {
-        // 현재 스타일 저장
-        const originalOverflow = modalBody.style.overflow;
-        const originalMaxHeight = modalBody.style.maxHeight;
-        const originalHeight = modalBody.style.height;
-        const originalModalMaxHeight = modal.style.maxHeight;
-        const originalModalHeight = modal.style.height;
         
         // 스크롤 영역을 전체 표시로 변경
         modalBody.style.overflow = 'visible';
@@ -2227,21 +2367,21 @@ window.copyModalToClipboard = async () => {
                     await navigator.clipboard.write([
                         new ClipboardItem({'image/png': blob})
                     ]);
-                    console.log('모달 이미지가 클립보드에 복사되었습니다.');
-                    alert('클립보드에 이미지가 복사되었습니다!');
+                    // console.log('모달 이미지가 클립보드에 복사되었습니다.');
+                    showToast('클립보드에 이미지가 복사되었습니다!', 'success');
                 } else {
                     // 대체 방법: 다운로드로 안내
-                    console.log('클립보드 API가 지원되지 않아 다운로드합니다.');
+                    // console.log('클립보드 API가 지원되지 않아 다운로드합니다.');
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
                     a.download = `modal_copy_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.png`;
                     a.click();
                     URL.revokeObjectURL(url);
-                    alert('클립보드 복사가 지원되지 않아 이미지로 다운로드되었습니다.');
+                    showToast('클립보드 복사가 지원되지 않아 이미지로 다운로드되었습니다.', 'error');
                 }
             } catch (clipboardErr) {
-                console.error('클립보드 API 실패:', clipboardErr);
+                // console.error('클립보드 API 실패:', clipboardErr);
                 // 실패 시 다운로드로 대체
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -2249,12 +2389,12 @@ window.copyModalToClipboard = async () => {
                 a.download = `modal_copy_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.png`;
                 a.click();
                 URL.revokeObjectURL(url);
-                alert('클립보드 복사 대신 이미지로 다운로드되었습니다.');
+                showToast('클립보드 복사 대신 이미지로 다운로드되었습니다.', 'error');
             }
         });
     } catch (err) {
-        console.error('모달 클립보드 복사 실패:', err);
-        alert('클립보드 복사에 실패했습니다.');
+        // console.error('모달 클립보드 복사 실패:', err);
+        showToast('클립보드 복사에 실패했습니다.', 'error');
         // 스타일 원복
         modalBody.style.overflow = originalOverflow;
         modalBody.style.maxHeight = originalMaxHeight;
@@ -2269,7 +2409,7 @@ setInterval(() => {
     const total = getTotalDamage(singleMode);
     document.getElementById('runtime-text').textContent = `${elapsed.toFixed(2)}초`;
     document.getElementById('total-text').textContent = `${total.toLocaleString()}`;
-    document.getElementById('total-dps-text').textContent = `${Math.round(total/(elapsed+1)).toLocaleString()}`;
+    document.getElementById('total-dps-text').textContent = elapsed > 0 ? `${Math.round(total/elapsed).toLocaleString()}` : '0';
 }, 500);
 
 // ========== WebSocket 연결 관리 ==========
@@ -2334,6 +2474,11 @@ function onConnectionChanged(connected) {
                         }
                         userTmpData = obj.data.user_tmp;
                         
+                        // 새로운 통계 데이터 저장 (슬라이딩 DPS, 버프 공격력/데미지 등)
+                        if (obj.data.stats) {
+                            window.globalStats = obj.data.stats;
+                        }
+                        
                         // 데이터 수신 시간 업데이트
                         lastDataTime = Date.now();
                         
@@ -2353,7 +2498,7 @@ function onConnectionChanged(connected) {
                         break;
                 }
             } catch (e) {
-                console.log("메시지 처리 오류:", e, event.data);
+                // console.log("메시지 처리 오류:", e, event.data);
             }
         };
 
@@ -2377,7 +2522,7 @@ function onConnectionChanged(connected) {
             setTimeout(() => {
                 if (typeof Chart !== 'undefined' && window.ChartZoom) {
                     Chart.register(window.ChartZoom);
-                    console.log('Chart.js zoom 플러그인 등록 완료');
+                    // console.log('Chart.js zoom 플러그인 등록 완료');
                 }
             }, 100);
         });
@@ -2387,7 +2532,7 @@ function onConnectionChanged(connected) {
         setTimeout(() => {
             if (typeof Chart !== 'undefined' && window.ChartZoom) {
                 Chart.register(window.ChartZoom);
-                console.log('Chart.js zoom 플러그인 등록 완료');
+                // console.log('Chart.js zoom 플러그인 등록 완료');
             }
         }, 100);
     }
@@ -2492,7 +2637,7 @@ function onConnectionChanged(connected) {
                 autoResetTimeInput.value = value;
                 autoResetTimeout = value * 1000;
                 localStorage.setItem('autoResetTime', value);
-                console.log(`자동 초기화 시간 변경: ${value}초`);
+                // console.log(`자동 초기화 시간 변경: ${value}초`);
             });
         }
         
@@ -2537,6 +2682,8 @@ function onConnectionChanged(connected) {
             viewModeSelect.addEventListener('change', () => {
                 viewMode = viewModeSelect.value;
                 localStorage.setItem('viewMode', viewMode);
+                // 렌더 해시를 리셋하여 강제로 다시 렌더링
+                lastRenderHash = null;
                 renderDamageRanks();
             });
         }

@@ -1,5 +1,5 @@
 {
     "Debug": false,
-    "Port": 8080,
+    "Port": 6519,
     "Iface": "None"
 }

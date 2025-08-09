@@ -15,16 +15,19 @@ from aiohttp import web
 import aiohttp_cors
 
 # 버전 정보
-__version__ = "1.0.7"
+__version__ = "1.2.0"
 __description__ = "Mabinogi Real-time Damage Meter"
 
 # 전역 설정 변수
 DEBUG = False  # 디버그 모드
-PORT = 8080    # WebSocket 서버 포트
-HTTP_PORT = 8081  # HTTP 서버 포트 (리소스 서빙용)
+PORT = 6519    # WebSocket 서버 포트
+HTTP_PORT = 6520  # HTTP 서버 포트 (리소스 서빙용)
 IFACE = None   # 네트워크 인터페이스
 CONNECTED_CLIENTS = set()  # 연결된 클라이언트 추적
 LAST_CONNECTION_TIME = time.time()  # 마지막 연결 시간
+
+# 전역 로거 객체 (나중에 초기화됨)
+logger = None
 
 # 시스템 상수 정의
 class SystemConstants:
@@ -422,14 +425,17 @@ class PacketStreamer:
                 segment_count = len(self.tcp_segments)
                 buffer_size = len(self.buffer)
                 
-                print(f"\n[상태] 유저: {user_count} | TCP세그먼트: {segment_count} | 버퍼: {buffer_size}B")
+                # 상태 정보는 디버그 모드에서만 로그로 기록
+                if logger and logger.debug:
+                    logger.log(f"유저: {user_count} | TCP세그먼트: {segment_count} | 버퍼: {buffer_size}B", "DEBUG")
                 
                 # 에러 통계가 있으면 출력
-                if logger.error_count:
-                    print(f"[에러] {dict(logger.error_count)}")
+                if logger and logger.error_count and logger.debug:
+                    logger.log(f"에러 카운트: {dict(logger.error_count)}", "ERROR")
                     
             except Exception as e:
-                logger.log(f"상태 출력 오류: {e}", "ERROR")
+                if logger:
+                    logger.log(f"상태 출력 오류: {e}", "ERROR")
     
     # WebSocket 클라이언트에게 데이터 스트리밍
     async def stream(self, websocket) -> None:
@@ -446,7 +452,8 @@ class PacketStreamer:
             status_task.cancel()
             cleanup_task.cancel()
             self.sniffer.stop()
-            logger.log("스트리밍 종료", "INFO")
+            if logger:
+                logger.log("스트리밍 종료", "INFO")
             self.sniffer.join()
 
     def _enqueue_packet(self, pkt: Packet) -> None:
@@ -498,12 +505,14 @@ class PacketStreamer:
                     else:
                         # 알려지지 않은 패킷 타입
                         if DEBUG:
-                            logger.log(f"알려지지 않은 패킷 타입: {data_type}, 크기: {len(content)}", "INFO")
+                            if logger:
+                                logger.log(f"알려지지 않은 패킷 타입: {data_type}, 크기: {len(content)}", "INFO")
                             
                 except Exception as e:
                     logger.count_error(f"packet_parse_{data_type}")
                     if DEBUG:
-                        logger.log(f"패킷 파싱 오류 (타입 {data_type}): {e}", "ERROR")
+                        if logger:
+                            logger.log(f"패킷 파싱 오류 (타입 {data_type}): {e}", "ERROR")
 
                 pivot += 9 + length
 
@@ -515,7 +524,8 @@ class PacketStreamer:
             try:
                 pkt: Packet = await self.queue.get()
             except asyncio.CancelledError as e:
-                logger.log("패킷 처리 취소됨", "INFO")
+                if logger:
+                    logger.log("패킷 처리 취소됨", "INFO")
                 break
 
             if pkt.haslayer(Raw):
@@ -537,7 +547,8 @@ class PacketStreamer:
                     sorted_seqs = sorted(self.tcp_segments.keys())
                     for seq in sorted_seqs[:len(sorted_seqs)//2]:
                         del self.tcp_segments[seq]
-                    logger.log(f"TCP 세그먼트 정리: {len(sorted_seqs)} -> {len(self.tcp_segments)}", "INFO")
+                    if logger:
+                        logger.log(f"TCP 세그먼트 정리: {len(sorted_seqs)} -> {len(self.tcp_segments)}", "INFO")
                     
                 if seq not in self.tcp_segments or self.tcp_segments[seq] != payload:
                     self.tcp_segments[seq] = payload
@@ -555,7 +566,8 @@ class PacketStreamer:
                     # 버퍼가 너무 크면 절반 정리
                     self.buffer = self.buffer[len(self.buffer)//2:]
                     if DEBUG:
-                        logger.log(f"버퍼 정리: {SystemConstants.BUFFER_SIZE} bytes 초과", "INFO")
+                        if logger:
+                            logger.log(f"버퍼 정리: {SystemConstants.BUFFER_SIZE} bytes 초과", "INFO")
 
                 parsed, pivot = self._packet_parser(self.buffer)
                 self.buffer = self.buffer[pivot:]
@@ -565,7 +577,8 @@ class PacketStreamer:
                         for entry in parsed:
                             self.analyzer.update(entry)
                     except Exception as e:
-                        logger.log(f"데이터 분석 오류: {e}", "ERROR")
+                        if logger:
+                            logger.log(f"데이터 분석 오류: {e}", "ERROR")
                         if DEBUG:
                             break
                         # 디버그 모드가 아니면 계속 실행
@@ -585,10 +598,12 @@ class PacketStreamer:
                     await asyncio.sleep(1.5)
                     
             except asyncio.CancelledError as e:
-                logger.log("데이터 전송 취소됨", "INFO")
+                if logger:
+                    logger.log("데이터 전송 취소됨", "INFO")
                 break
             except Exception as e:
-                logger.log(f"WebSocket 전송 오류: {e}", "ERROR")
+                if logger:
+                    logger.log(f"WebSocket 전송 오류: {e}", "ERROR")
                 await asyncio.sleep(1)  # 에러 발생시 잠시 대기 후 재시도
 
 # 데이터 분석 관련 임포트
@@ -608,6 +623,60 @@ class DamageData:
     fast_count: int = 0
     max_damage: int = 0
     min_damage: int = 0
+    
+    # 슬라이딩 윈도우 DPS를 위한 히스토리
+    damage_history: list = field(default_factory=list)  # [(damage, timestamp), ...]
+    sliding_window_dps: float = 0.0
+    
+    # 평균 공증/피증 계산을 위한 데이터
+    base_damage_list: list = field(default_factory=list)
+    actual_damage_list: list = field(default_factory=list)
+    
+    def add_damage_record(self, damage: int, timestamp: float, is_base: bool = False):
+        """데미지 기록 추가 및 오래된 기록 정리"""
+        self.damage_history.append((damage, timestamp))
+        
+        # 30분 이상 된 기록 제거
+        cutoff_time = timestamp - 1800
+        self.damage_history = [(d, t) for d, t in self.damage_history if t > cutoff_time]
+        
+        # base/actual 데미지 기록
+        if is_base:
+            self.base_damage_list.append(damage)
+            if len(self.base_damage_list) > 1000:  # 최대 1000개만 유지
+                self.base_damage_list = self.base_damage_list[-1000:]
+        else:
+            self.actual_damage_list.append(damage)
+            if len(self.actual_damage_list) > 1000:
+                self.actual_damage_list = self.actual_damage_list[-1000:]
+    
+    def calculate_sliding_dps(self, window_seconds: int = 5) -> float:
+        """슬라이딩 윈도우 DPS 계산 (기본 5초)"""
+        if not self.damage_history:
+            return 0.0
+        
+        current_time = time.time()
+        cutoff_time = current_time - window_seconds
+        recent_damages = [d for d, t in self.damage_history if t >= cutoff_time]
+        
+        if not recent_damages:
+            return 0.0
+            
+        total_damage = sum(recent_damages)
+        return total_damage / window_seconds
+    
+    def calculate_avg_multiplier(self) -> float:
+        """평균 공증 계산"""
+        if not self.base_damage_list or not self.actual_damage_list:
+            return 100.0
+        
+        avg_base = sum(self.base_damage_list) / len(self.base_damage_list)
+        avg_actual = sum(self.actual_damage_list) / len(self.actual_damage_list)
+        
+        if avg_base == 0:
+            return 100.0
+            
+        return (avg_actual / avg_base) * 100
 
 # 버프 영향 데이터 클래스
 @dataclass
@@ -638,7 +707,73 @@ class CombatDetailData:
 class BuffUptimeData:
     type: int = 0
     max_stack: int = 0
-    total_stack: int = 0  # 버프가 켜진 상태에서 공격한 횟수
+    total_stack: int = 0  # 버프 스택 누적 값
+    total_count: int = 0  # 버프 활성 횟수
+    
+    # 시간 기반 가동률 계산을 위한 필드
+    start_time: float = 0
+    end_time: float = 0
+    active_duration: float = 0  # 누적 활성 시간
+    stack_history: list = field(default_factory=list)  # [(stack, timestamp), ...]
+    is_active: bool = False
+    
+    def start_buff(self, timestamp: float, stack: int = 1):
+        """버프 시작"""
+        if not self.is_active:
+            self.start_time = timestamp
+            self.is_active = True
+        self.update_stack(stack, timestamp)
+    
+    def end_buff(self, timestamp: float):
+        """버프 종료"""
+        if self.is_active:
+            duration = timestamp - self.start_time
+            self.active_duration += duration
+            self.end_time = timestamp
+            self.is_active = False
+    
+    def update_stack(self, new_stack: int, timestamp: float):
+        """스택 업데이트 및 히스토리 기록"""
+        self.stack_history.append((new_stack, timestamp))
+        self.max_stack = max(self.max_stack, new_stack)
+        # 1000개 이상 쌓이면 오래된 것 제거
+        if len(self.stack_history) > 1000:
+            self.stack_history = self.stack_history[-1000:]
+    
+    def calculate_uptime(self, combat_duration: float) -> float:
+        """정확한 가동률 계산 (시간 기반)"""
+        if combat_duration == 0:
+            return 0.0
+        
+        # 현재 활성 중이면 현재까지의 시간 추가
+        total_active = self.active_duration
+        if self.is_active:
+            current_duration = time.time() - self.start_time
+            total_active += current_duration
+        
+        return (total_active / combat_duration) * 100
+    
+    def calculate_weighted_avg_stack(self) -> float:
+        """시간 가중 평균 스택 계산"""
+        if len(self.stack_history) < 2:
+            return self.max_stack if self.stack_history else 0
+        
+        weighted_sum = 0
+        total_duration = 0
+        
+        for i in range(len(self.stack_history) - 1):
+            duration = self.stack_history[i+1][1] - self.stack_history[i][1]
+            stack = self.stack_history[i][0]
+            weighted_sum += stack * duration
+            total_duration += duration
+        
+        # 마지막 구간 처리
+        if self.is_active and self.stack_history:
+            last_duration = time.time() - self.stack_history[-1][1]
+            weighted_sum += self.stack_history[-1][0] * last_duration
+            total_duration += last_duration
+        
+        return weighted_sum / total_duration if total_duration > 0 else 0
 
 # 간단한 데미지 데이터 클래스
 @dataclass
@@ -721,7 +856,7 @@ class CombatLogAnalyzer:
         # 성능 최적화를 위한 캐시
         self._last_sent_data_hash = None  # 마지막 전송 데이터 해시
         self._data_changed = True  # 데이터 변경 플래그
-        self._cached_json_data = {}  # JSON 캐시
+        self._cached_json_data = None  # JSON 캐시
         self._last_combat_time = time.time()  # 마지막 전투 시간
 
         # 스킬 및 버프 데이터 파일 로드
@@ -777,10 +912,12 @@ class CombatLogAnalyzer:
                             cleaned_count += 1
                 
                 if cleaned_count > 0:
-                    logger.log(f"메모리 정리: {cleaned_count}명의 오래된 데이터 삭제", "INFO")
+                    if logger:
+                        logger.log(f"메모리 정리: {cleaned_count}명의 오래된 데이터 삭제", "INFO")
                     
             except Exception as e:
-                logger.log(f"메모리 정리 오류: {e}", "ERROR")
+                if logger:
+                    logger.log(f"메모리 정리 오류: {e}", "ERROR")
     
     # WebSocket으로 분석된 데이터 전송 (성능 최적화)
     async def send_data(self, websocket):
@@ -792,7 +929,7 @@ class CombatLogAnalyzer:
         is_combat_active = (time.time() - self._last_combat_time) < 10
         
         # 캐싱된 JSON 데이터가 없거나 전투 중일 때만 새로 생성
-        if is_combat_active or not self._cached_json_data:
+        if is_combat_active or self._cached_json_data is None:
             # 필요한 경우에만 recursive_asdict 수행
             def recursive_asdict(obj):
                 if is_dataclass(obj) and not isinstance(obj, type):
@@ -836,13 +973,24 @@ class CombatLogAnalyzer:
                 return
         
         try:
+            # 데이터가 없으면 기본 구조 전송
+            data_to_send = self._cached_json_data if self._cached_json_data is not None else {
+                "self_id": 0,
+                "enemy": {"max_hp_tid": 0, "max_hp": 0, "last_attacked_tid": 0},
+                "damage": {0: {0: {"": {}}}},
+                "damage2": {0: {0: {"": {}}}},
+                "buff": {0: {0: {"": {"": {}}}}},
+                "hit_time": {},
+                "stats": {}
+            }
             await websocket.send(json.dumps({
                 "type": "damage",
-                "data": self._cached_json_data
+                "data": data_to_send
             }))
             self._data_changed = False  # 전송 후 플래그 리셋
         except Exception as e:
-            logger.log(f"데이터 전송 오류: {e}", "ERROR")
+            if logger:
+                logger.log(f"데이터 전송 오류: {e}", "ERROR")
 
     # 새로운 패킷 데이터로 통계 업데이트
     def update(self, entry):
@@ -869,22 +1017,32 @@ class CombatLogAnalyzer:
             )
             utdata = self._user_tmp_data.setdefault(uid, UserTmpData())
             is_updated = False
+            
+            # HP 변화 패킷과 매칭 (타입 3)
             if self._raw_data.get(3) is not None:
                 tid3 = self._raw_data[3].get("target_id",0)
-                damage = self._raw_data[3].get("prev_hp", 0) - self._raw_data[3].get("current_hp", 0)
+                # 타겟 ID가 일치하고 시간차가 적을 때만 매칭
                 if tid3 == tid:
-                    CombatLogAnalyzer._update_combat(self._damage_by_user_by_target_by_skill, 
-                                                     uid, tid, damage, flags, skill, utdata)
-                    is_updated = True
+                    damage = self._raw_data[3].get("prev_hp", 0) - self._raw_data[3].get("current_hp", 0)
+                    if damage > 0:  # 데미지가 양수일 때만
+                        CombatLogAnalyzer._update_combat(self._damage_by_user_by_target_by_skill, 
+                                                         uid, tid, damage, flags, skill, utdata)
+                        is_updated = True
+                        self._raw_data[3] = None  # 사용한 패킷은 초기화
 
+            # 자가 데미지 패킷과 매칭 (타입 4)
             if self._raw_data.get(4) is not None:
-                tid3 = self._raw_data[4].get("target_id",0)
-                damage = self._raw_data[4].get("damage", 0)
-                if tid3 == tid:
-                    CombatLogAnalyzer._update_combat(self._self_damage_by_user_by_target_by_skill, 
-                                                     uid, tid, damage, flags, skill, utdata)
-                    CombatLogAnalyzer._update_enemy_data(self._enemy_data, tid, 0, self._self_damage_by_user_by_target_by_skill[0][tid][""].all.total_damage)
-                    is_updated = True
+                tid4 = self._raw_data[4].get("target_id",0)
+                uid4 = self._raw_data[4].get("user_id", 0)
+                # 유저 ID와 타겟 ID가 일치할 때만
+                if tid4 == tid and uid4 == uid:
+                    damage = self._raw_data[4].get("damage", 0)
+                    if damage > 0:  # 데미지가 양수일 때만
+                        CombatLogAnalyzer._update_combat(self._self_damage_by_user_by_target_by_skill, 
+                                                         uid, tid, damage, flags, skill, utdata)
+                        CombatLogAnalyzer._update_enemy_data(self._enemy_data, tid, 0, self._self_damage_by_user_by_target_by_skill[0][tid][""].all.total_damage)
+                        is_updated = True
+                        self._raw_data[4] = None  # 사용한 패킷은 초기화
 
             if CombatLogAnalyzer._is_dot(flags) == False and is_updated:
                 CombatLogAnalyzer._update_buff_uptime(
@@ -912,7 +1070,8 @@ class CombatLogAnalyzer:
             uid = entry["user_id"]
             damage = entry["damage"]            
             if damage > SystemConstants.MAX_DAMAGE_THRESHOLD: 
-                logger.log(f"비정상 데미지 감지: {damage}", "INFO")
+                if logger:
+                    logger.log(f"비정상 데미지 감지: {damage}", "INFO")
                 return
     
             self._raw_data[4] = entry
@@ -1042,6 +1201,7 @@ class CombatLogAnalyzer:
     @staticmethod
     def _update_buff_impact_data(c:BuffImpactData, utd:UserTmpData):
         c.total_count    += 1
+        # 버프 값이 이미 퍼센트이므로 그대로 누적 (나중에 평균 계산)
         c.total_atk      += utd.atk_buff
         c.total_dmg      += utd.dmg_buff
 
@@ -1062,9 +1222,10 @@ class CombatLogAnalyzer:
     @staticmethod
     def _update_buff_uptime_data(c:BuffUptimeData, inst:BuffInstData):
         c.max_stack = max(c.max_stack, inst.buff_stack)
-        # 버프가 활성화되어 있을 때만 카운트 (스택 무관하게 1로 카운트)
+        # 실제 스택 값을 누적 (가중 평균 계산용)
         if inst.buff_stack > 0:
-            c.total_stack += 1  # 버프 활성 시 1씩만 증가
+            c.total_stack += inst.buff_stack  # 실제 스택 값 누적
+            c.total_count += 1  # 활성 횟수 카운트
         c.type = inst.buff_type
         
     # 유저 버프 상태 업데이트
@@ -1199,7 +1360,7 @@ async def handle_http_request(request):
         # app.js의 WebSocket URL을 동적으로 수정
         if path == '/app.js':
             # localhost를 현재 호스트로 변경 (필요시)
-            content = content.replace('ws://localhost:8080', f'ws://localhost:{PORT}')
+            content = content.replace('ws://localhost:6519', f'ws://localhost:{PORT}')
         
         return web.Response(
             text=content,
@@ -1207,31 +1368,38 @@ async def handle_http_request(request):
             charset='utf-8'
         )
     except Exception as e:
-        logger.log(f"HTTP 서버 파일 읽기 오류: {e}", "ERROR")
+        if logger:
+            logger.log(f"HTTP 서버 파일 읽기 오류: {e}", "ERROR")
         return web.Response(text='Internal Server Error', status=500)
 
 # 메인 함수 - WebSocket 및 HTTP 서버 시작
 async def main() -> None:
-    global CONNECTED_CLIENTS, LAST_CONNECTION_TIME
+    global CONNECTED_CLIENTS, LAST_CONNECTION_TIME, logger
     
-    print("\n" + "="*70)
-    print(f"  Mobi-Meter v{__version__} - {__description__}")
-    print("="*70)
-    print(f"  [서버] WebSocket: ws://localhost:{PORT}")
-    print(f"  [서버] HTTP: http://localhost:{HTTP_PORT}")
-    print(f"  [종료] Ctrl+C를 누르세요")
-    print("="*70)
+    # 로거 초기화
+    logger = SimpleLogger(debug=DEBUG)
+    
+    # 시작 메시지
+    startup_msg = f"""
+{'='*70}
+  Mobi-Meter v{__version__} - {__description__}
+{'='*70}
+  [서버] WebSocket: ws://localhost:{PORT}
+  [서버] HTTP: http://localhost:{HTTP_PORT}
+  [종료] Ctrl+C를 누르세요
+{'='*70}"""
+    print(startup_msg)
     
     async def wsserve(websocket) -> None:
         global CONNECTED_CLIENTS, LAST_CONNECTION_TIME
         client_ip = websocket.remote_address[0]
         if DEBUG:
-            print(f"  [연결] 클라이언트: {client_ip}")
+            logger.log(f"클라이언트 연결: {client_ip}", "IMPORTANT")
         
         # 클라이언트 추가
         CONNECTED_CLIENTS.add(websocket)
         LAST_CONNECTION_TIME = time.time()
-        print(f"  [연결] 현재 클라이언트: {len(CONNECTED_CLIENTS)}명")
+        logger.log(f"현재 클라이언트: {len(CONNECTED_CLIENTS)}명", "INFO")
         
         try:
             streamer = PacketStreamer()
@@ -1240,11 +1408,11 @@ async def main() -> None:
             # 클라이언트 제거
             CONNECTED_CLIENTS.discard(websocket)
             if DEBUG:
-                print(f"  [해제] 클라이언트: {client_ip}")
-            print(f"  [연결] 현재 클라이언트: {len(CONNECTED_CLIENTS)}명")
+                logger.log(f"클라이언트 연결 해제: {client_ip}", "IMPORTANT")
+            logger.log(f"현재 클라이언트: {len(CONNECTED_CLIENTS)}명", "INFO")
             
             if len(CONNECTED_CLIENTS) == 0:
-                print(f"  [종료] {SystemConstants.AUTO_SHUTDOWN_DELAY}초 후 자동 종료...")
+                logger.log(f"{SystemConstants.AUTO_SHUTDOWN_DELAY}초 후 자동 종료...", "WARNING")
         
     # HTTP 서버 설정 및 시작
     app = web.Application()
@@ -1269,53 +1437,57 @@ async def main() -> None:
     
     # HTTP 서버 시작
     await site.start()
-    print(f"  [OK] HTTP 서버 시작 완료!")
-    print(f"  [HTTP PORT] {HTTP_PORT}")
+    logger.log(f"HTTP 서버 시작 완료 - 포트: {HTTP_PORT}", "IMPORTANT")
     
-    async with serve(wsserve, '0.0.0.0', PORT, max_size=10_000_000):
-        print(f"  [OK] WebSocket 서버 시작 완료!")
-        print(f"  [WEBSOCKET PORT] {PORT}")
-        print(f"  [STATUS] 실시간 데미지 측정 대기중...")
-        print(f"  [경고] 관리자 권한으로 실행하세요")
-        print("="*70)
-        
-        # 브라우저 자동 열기 (HTTP 서버 URL)
-        print(f"  [BROWSER] 브라우저를 여는 중...")
-        try:
-            # HTTP 서버 URL로 브라우저 열기
-            http_url = f'http://localhost:{HTTP_PORT}'
-            webbrowser.open(http_url)
-            print(f"  [OK] 브라우저에서 대시보드를 열었습니다")
-            print(f"  [URL] {http_url}")
-            # exe 파일 안내 메시지 제거
-        except Exception as e:
-            print(f"  [브라우저] 수동으로 {http_url} 열어주세요")
-        
-        print("="*70 + "\n")
-        
-        # 자동 종료 체크 태스크
-        async def auto_shutdown_check():
-            global CONNECTED_CLIENTS, LAST_CONNECTION_TIME
-            while True:
-                await asyncio.sleep(5)  # 5초마다 체크
+    # 자동 종료 체크 태스크
+    async def auto_shutdown_check():
+        global CONNECTED_CLIENTS, LAST_CONNECTION_TIME
+        while True:
+            await asyncio.sleep(5)  # 5초마다 체크
+            
+            if len(CONNECTED_CLIENTS) == 0:
+                idle_time = time.time() - LAST_CONNECTION_TIME
+                remaining = SystemConstants.AUTO_SHUTDOWN_DELAY - idle_time
                 
-                if len(CONNECTED_CLIENTS) == 0:
-                    idle_time = time.time() - LAST_CONNECTION_TIME
-                    remaining = SystemConstants.AUTO_SHUTDOWN_DELAY - idle_time
-                    
-                    if remaining <= 0:
-                        print(f"\n[AUTO-SHUTDOWN] 연결된 클라이언트가 없어 프로그램을 종료합니다.")
-                        return  # 메인 함수 종료
-                    elif remaining <= 10:
-                        print(f"  [AUTO-SHUTDOWN] {int(remaining)}초 후 자동 종료...")
-        
-        # 자동 종료 체크 시작
-        shutdown_task = asyncio.create_task(auto_shutdown_check())
-        
-        try:
-            await shutdown_task  # 자동 종료 대기
-        except asyncio.CancelledError:
-            pass  # Ctrl+C로 취소됨
+                if remaining <= 0:
+                    logger.log("연결된 클라이언트가 없어 프로그램을 종료합니다.", "WARNING")
+                    # 서버들을 정리하고 종료
+                    raise KeyboardInterrupt("자동 종료")
+                elif remaining <= 10:
+                    logger.log(f"{int(remaining)}초 후 자동 종료...", "INFO")
+    
+    # WebSocket 서버 시작
+    ws_server = await serve(wsserve, '0.0.0.0', PORT, max_size=10_000_000)
+    logger.log(f"WebSocket 서버 시작 완료 - 포트: {PORT}", "IMPORTANT")
+    logger.log("실시간 데미지 측정 대기중...", "INFO")
+    logger.log("관리자 권한으로 실행하세요", "WARNING")
+    print("="*70)
+    
+    # 브라우저 자동 열기 (HTTP 서버 URL)
+    logger.log("브라우저를 여는 중...", "INFO")
+    try:
+        # HTTP 서버 URL로 브라우저 열기
+        http_url = f'http://localhost:{HTTP_PORT}'
+        webbrowser.open(http_url)
+        logger.log(f"브라우저에서 대시보드를 열었습니다: {http_url}", "IMPORTANT")
+        # exe 파일 안내 메시지 제거
+    except Exception as e:
+        logger.log(f"수동으로 브라우저에서 {http_url}를 열어주세요", "WARNING")
+    
+    print("="*70)
+    
+    # 자동 종료 체크 시작
+    shutdown_task = asyncio.create_task(auto_shutdown_check())
+    
+    try:
+        # 서버 무한 대기
+        await asyncio.Future()  # 프로그램이 종료될 때까지 대기
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        # 정리 작업
+        shutdown_task.cancel()
+        ws_server.close()
+        await ws_server.wait_closed()
+        await runner.cleanup()
 
 # 자동 재시작 기능
 async def stable_main() -> None:
@@ -1327,10 +1499,10 @@ async def stable_main() -> None:
         try:
             await main()
             # main()이 정상 종료되면 (자동 종료 등) 프로그램 종료
-            print("\n[EXIT] 프로그램을 종료합니다.")
+            logger.log("프로그램을 종료합니다.", "IMPORTANT")
             break
         except KeyboardInterrupt:
-            print("\n\n사용자에 의해 중단됨")
+            logger.log("사용자에 의해 중단됨", "INFO")
             break
         except Exception as e:
             restart_count += 1
@@ -1339,10 +1511,12 @@ async def stable_main() -> None:
             
             # 포트 충돌 오류 체크
             if "10048" in error_msg or "bind" in error_msg:
-                print(f"\n[오류] 포트 {PORT}가 이미 사용 중입니다!")
-                print(f"  [해결방법1] 기존 실행 중인 mobi-meter.exe를 종료하세요")
-                print(f"  [해결방법2] 작업 관리자에서 python.exe 또는 mobi-meter.exe 프로세스를 종료하세요")
-                print(f"  [해결방법3] settings.json에서 다른 포트 번호로 변경하세요")
+                error_msg = f"""
+[오류] 포트 {PORT}가 이미 사용 중입니다!
+  [해결방법1] 기존 실행 중인 mobi-meter.exe를 종료하세요
+  [해결방법2] 작업 관리자에서 python.exe 또는 mobi-meter.exe 프로세스를 종료하세요
+  [해결방법3] settings.json에서 다른 포트 번호로 변경하세요"""
+                print(error_msg)
                 break
             
             if restart_count < max_restarts:
@@ -1357,18 +1531,21 @@ if __name__ == '__main__':
     import sys
     import os
     
+    # 임시 로거 객체 생성 (설정 파일 로드 전까지 사용)
+    temp_logger = SimpleLogger(debug=False)
+    
     # exe 실행시 실행 파일이 있는 디렉토리에서 settings.json 찾기
     if getattr(sys, 'frozen', False):
         # PyInstaller로 빌드된 exe 실행시
         base_path = sys._MEIPASS  # 임시 폴더에 압축 해제된 파일들의 경로
-        print(f"  [EXE 모드] 데이터 경로 = {base_path}")
+        # temp_logger.log("DEBUG", f"EXE 모드 - 데이터 경로: {base_path}")
     else:
         # 일반 Python 스크립트 실행시
         base_path = os.path.dirname(os.path.abspath(__file__))
-        print(f"  [스크립트 모드] 데이터 경로 = {base_path}")
+        # temp_logger.log("DEBUG", f"스크립트 모드 - 데이터 경로: {base_path}")
     
     settings_path = os.path.join(base_path, 'settings.json')
-    print(f"  [설정 파일] 경로: {settings_path}")
+    # temp_logger.log("DEBUG", f"설정 파일 경로: {settings_path}")
     
     try:
         with open(settings_path, 'r', encoding='utf-8') as f:
@@ -1377,17 +1554,15 @@ if __name__ == '__main__':
             PORT    = data.get("Port", 8080)
             IFACE    = data.get("Iface", None)
             if IFACE == "None": IFACE = None
-            print(f"  [OK] 설정 파일 로드 성공")
-            print(f"  [설정] Debug={DEBUG}")
+            # temp_logger.log("INFO", f"설정 파일 로드 성공 - Debug={DEBUG}")
     except FileNotFoundError:
-        if DEBUG:
-            print(f"  [설정] settings.json 없음 - 기본값 사용")
+        # temp_logger.log("INFO", "settings.json 없음 - 기본값 사용")
         DEBUG = False
         PORT = 8080
         IFACE = None
     except Exception as e:
-        if DEBUG:
-            print(f"  [설정] 파일 로드 실패: {e}")
+        # temp_logger.log("ERROR", f"설정 파일 로드 실패: {e}")
+        pass
         DEBUG = False
         PORT = 8080
         IFACE = None

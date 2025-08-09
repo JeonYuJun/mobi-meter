@@ -1291,8 +1291,8 @@ body[data-theme="light"] {
 
 .damage-list-item {
     display: grid;
-    grid-template-columns: 40px 150px 1fr 120px 120px 80px 80px 80px 80px;
-    gap: 12px;
+    grid-template-columns: 40px minmax(100px, 150px) minmax(80px, 1fr) minmax(80px, 100px) minmax(80px, 100px) 60px 60px 60px 60px;
+    gap: 8px;
     align-items: center;
     padding: 12px 16px;
     background: var(--bg-card);
@@ -1347,26 +1347,29 @@ body[data-theme="light"] {
 }
 
 .list-dps {
-    font-size: 1.1em;
+    font-size: 1em;
     font-weight: 700;
     color: var(--primary-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .list-damage, .list-share {
     font-weight: 600;
     color: var(--text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .list-stat {
-    font-size: 0.9em;
+    font-size: 0.85em;
     color: var(--text-dim);
     text-align: center;
-}
-
-.list-stat {
-    text-align: center;
-    font-size: 0.9em;
-    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .list-damage-bar {
@@ -1427,6 +1430,71 @@ body[data-theme="light"] {
 @keyframes ripple {
     to {
         transform: scale(4);
+        opacity: 0;
+    }
+}
+
+/* ========== 토스트 알림 스타일 ========== */
+.toast-notification {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-card);
+    color: var(--text-color);
+    padding: 12px 24px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    z-index: 10000;
+    opacity: 0;
+    animation: toastSlideDown 0.3s ease forwards;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.9em;
+}
+
+.toast-notification.success {
+    border-color: var(--accent-success);
+    background: linear-gradient(90deg, rgba(76, 175, 80, 0.1) 0%, var(--bg-card) 100%);
+}
+
+.toast-notification.error {
+    border-color: var(--accent-danger);
+    background: linear-gradient(90deg, rgba(244, 67, 54, 0.1) 0%, var(--bg-card) 100%);
+}
+
+.toast-notification i {
+    font-size: 1.2em;
+}
+
+.toast-notification.success i {
+    color: var(--accent-success);
+}
+
+.toast-notification.error i {
+    color: var(--accent-danger);
+}
+
+@keyframes toastSlideDown {
+    0% {
+        transform: translate(-50%, -100%);
+        opacity: 0;
+    }
+    100% {
+        transform: translate(-50%, 0);
+        opacity: 1;
+    }
+}
+
+@keyframes toastFadeOut {
+    0% {
+        transform: translate(-50%, 0);
+        opacity: 1;
+    }
+    100% {
+        transform: translate(-50%, -20px);
         opacity: 0;
     }
 }
