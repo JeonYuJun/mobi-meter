@@ -11,6 +11,7 @@ let enemyData = {}               // 적 정보
 let userData = {}                // 유저 정보
 let hitTime = {};                // 타격 시간 기록
 let userTmpData = {}             // 임시 유저 데이터
+let serverStats = {};            // 서버에서 받은 통계 데이터
 
 // UI 및 렌더링 관련 변수
 let bossMode = "all";            // 보스 모드 (all/single)
@@ -948,7 +949,8 @@ function renderDetailStats(uid, container) {
     
     const statsHtml = `
         <div class="modal-stats-container" style="margin-top: 12px;">
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+            <!-- 기본 통계 섹션 -->
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px;">
                 <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
                     <div style="font-size: 0.7em; color: var(--text-dim);">${skill ? '스킬 데미지' : '총 데미지'}</div>
                     <div style="font-size: 0.95em; font-weight: 600; color: #00c896; word-break: break-all; margin-top: 8px;">${skill ? (db.all.total_damage || 0).toLocaleString() : totalDamage.toLocaleString()}</div>
@@ -965,10 +967,32 @@ function renderDetailStats(uid, container) {
                     <div style="font-size: 0.7em; color: var(--text-dim);">전투 시간</div>
                     <div style="font-size: 0.95em; font-weight: 600; color: #00c896; margin-top: 8px;">${Math.floor(combatTime)}초</div>
                 </div>
+            </div>
+            
+            <!-- 타격 횟수 섹션 -->
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px;">
                 <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
-                    <div style="font-size: 0.7em; color: var(--text-dim);">총 타격수</div>
-                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; word-break: break-all; margin-top: 8px;">${totalHits.toLocaleString()}</div>
+                    <div style="font-size: 0.7em; color: var(--text-dim);">일반 타격수</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; word-break: break-all; margin-top: 8px;">
+                        ${((skill ? db.normal.total_count : totalDb.normal.total_count) || 0).toLocaleString()}
+                    </div>
                 </div>
+                <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
+                    <div style="font-size: 0.7em; color: var(--text-dim);">특수 타격수</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; word-break: break-all; margin-top: 8px;">
+                        ${((skill ? db.special.total_count : totalDb.special.total_count) || 0).toLocaleString()}
+                    </div>
+                </div>
+                <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
+                    <div style="font-size: 0.7em; color: var(--text-dim);">도트 타격수</div>
+                    <div style="font-size: 0.95em; font-weight: 600; color: #00c896; word-break: break-all; margin-top: 8px;">
+                        ${((skill ? db.dot.total_count : totalDb.dot.total_count) || 0).toLocaleString()}
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 확률 통계 섹션 (첫 번째 줄) -->
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px;">
                 <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
                     <div style="font-size: 0.7em; color: var(--text-dim);">치명타</div>
                     <div style="font-size: 0.95em; font-weight: 600; color: #00c896; margin-top: 8px;">${critRate}%</div>
@@ -981,6 +1005,10 @@ function renderDetailStats(uid, container) {
                     <div style="font-size: 0.7em; color: var(--text-dim);">강타율</div>
                     <div style="font-size: 0.95em; font-weight: 600; color: #00c896; margin-top: 8px;">${powerRate}%</div>
                 </div>
+            </div>
+            
+            <!-- 버프 통계 섹션 (두 번째 줄) -->
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
                 <div class="buff-item" style="background: var(--bg-soft); padding: 12px 10px; border-radius: 6px; text-align: center; border: 1px solid var(--border-color); overflow: hidden; display: flex; flex-direction: column; justify-content: center; min-height: 60px;">
                     <div style="font-size: 0.7em; color: var(--text-dim);">연타율</div>
                     <div style="font-size: 0.95em; font-weight: 600; color: #00c896; margin-top: 8px;">${fastRate}%</div>
@@ -1015,26 +1043,45 @@ function renderDetailBuffs(uid, container) {
     
     // 버프를 타입별로 그룹화
     const buffsByType = {};
-    const stats = window.globalStats?.[uid] || {};
-    const buffStats = stats.buff_stats || {};
+    
+    // 서버에서 받은 버프 통계 사용
+    const buffStats = serverStats?.buff_uptime?.[uid] || {};
     
     for (const [key, value] of Object.entries(buffs)) {
         const type = value.type;
         if (!buffsByType[type]) buffsByType[type] = [];
         
-        // 버프 가동률 계산 수정 - 전체 데이터 기준으로 계산
-        const buffStat = buffStats[key] || {};
-        const totalHits = totalDb.normal.total_count + totalDb.special.total_count;
-        // total_count가 버프 활성 횟수, 전체 공격 횟수로 나누어 가동률 계산
-        const uptime = buffStat.uptime || (value.total_count > 0 && totalHits > 0 ? calcPercent(value.total_count, totalHits) : 0);
-        // 평균 스택은 총 스택 / 활성 횟수
-        const avgStack = buffStat.avg_stack || (value.total_count > 0 ? (value.total_stack / value.total_count).toFixed(1) : value.max_stack);
+        let uptime = 0;
+        let avgStack = 0;
+        let maxStack = value.max_stack || 0;
+        
+        if (skill && skill !== "") {
+            // 스킬별 버프 데이터
+            const skillBuffData = buffDB[uid]?.[tid]?.[skill]?.[key];
+            if (skillBuffData && skillBuffData.total_count > 0) {
+                const normalHits = (db.normal?.total_count || 0) + (db.special?.total_count || 0);
+                // dist_20250806 방식: total_stack/max_stack 비율을 normalHits에 대한 백분율로 계산
+                uptime = normalHits > 0 && skillBuffData.max_stack > 0 ? 
+                    Math.min(100, calcPercent(skillBuffData.total_stack / skillBuffData.max_stack, normalHits)) : 0;
+                avgStack = skillBuffData.total_stack / skillBuffData.total_count;
+                maxStack = skillBuffData.max_stack || maxStack;
+            }
+        } else {
+            // 전체 데이터
+            if (value.total_count > 0 && value.max_stack > 0) {
+                const normalHits = (totalDb.normal?.total_count || 0) + (totalDb.special?.total_count || 0);
+                // dist_20250806 방식: total_stack/max_stack 비율을 normalHits에 대한 백분율로 계산
+                uptime = normalHits > 0 ? 
+                    Math.min(100, calcPercent(value.total_stack / value.max_stack, normalHits)) : 0;
+                avgStack = value.total_stack / value.total_count;
+            }
+        }
         
         buffsByType[type].push({
             name: key, 
-            uptime: typeof uptime === 'number' ? uptime.toFixed(1) : uptime,
-            maxStack: value.max_stack,
-            avgStack: typeof avgStack === 'number' ? avgStack.toFixed(1) : avgStack,
+            uptime: parseFloat(uptime).toFixed(1),
+            maxStack: maxStack,
+            avgStack: parseFloat(avgStack).toFixed(1),
             color: colors[type]
         });
     }
@@ -1063,7 +1110,7 @@ function renderDetailBuffs(uid, container) {
                     <div class="circle" style="width: 12px; height: 12px; border-radius: 50%; background:#${buff.color}; margin-right: 12px; flex-shrink: 0;"></div>
                     <div style="flex: 1; overflow: hidden;">
                         <div style="font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${buff.name}</div>
-                        <div style="font-size: 0.85em; color: var(--text-dim);">가동률: ${buff.uptime}% / 평균: ${buff.avgStack} / 최대: ${buff.maxStack}</div>
+                        <div style="font-size: 0.85em; color: var(--text-dim);">가동률: ${buff.uptime}% / 평균: ${buff.avgStack}스택 / 최대: ${buff.maxStack}스택</div>
                     </div>
                     <div style="margin-left: 12px; font-weight: 600; color: #${buff.color};">${buff.uptime}%</div>
                 </div>
@@ -1621,18 +1668,17 @@ function renderListView(sorted, totalSum) {
     
     // 헤더 추가
     const header = document.createElement('div');
-    header.className = 'damage-list-item';
-    header.style.cssText = 'background: var(--bg-soft); font-weight: 600; font-size: 0.85em; color: var(--text-dim); cursor: default;';
+    header.className = 'damage-list-header';
     header.innerHTML = `
-        <div class="list-rank">순위</div>
+        <div style="text-align: center;">순위</div>
         <div>직업</div>
         <div style="text-align: center;">DPS</div>
         <div style="text-align: center;">총 데미지</div>
         <div style="text-align: center;">점유율</div>
-        <div class="list-stat">크리</div>
-        <div class="list-stat">추타</div>
-        <div class="list-stat">공증</div>
-        <div class="list-stat">피증</div>
+        <div style="text-align: center;">크리</div>
+        <div style="text-align: center;">추타</div>
+        <div style="text-align: center;">공증</div>
+        <div style="text-align: center;">피증</div>
     `;
     statsList.appendChild(header);
     
@@ -1742,6 +1788,7 @@ function clearDB () {
     userData = {}
     hitTime = {};
     userTmpData = null;
+    serverStats = {};
 
     selectedDetailUserId = null;
     skillDetailOpened = {};
@@ -2018,35 +2065,118 @@ document.addEventListener('click', () => {
     document.getElementById('exportMenu').style.display = 'none';
 });
 
-// 스크린샷 기능  
-window.exportScreenshot = async () => {
-    // 전체 컨테이너 찾기
-    const container = document.querySelector('.container');
-    if (!container) return;
+// html2canvas 로드 함수
+let html2canvasLoadPromise = null;
+
+async function loadHtml2Canvas() {
+    // 이미 로드됨
+    if (window.html2canvas) {
+        console.log('[html2canvas] 이미 로드됨');
+        return true;
+    }
     
-    // html2canvas 라이브러리 로드
-    if (!window.html2canvas) {
+    // 이미 로딩 중이면 같은 promise 반환
+    if (html2canvasLoadPromise) {
+        console.log('[html2canvas] 로딩 중... 기다리는 중');
+        try {
+            return await html2canvasLoadPromise;
+        } catch (error) {
+            console.error('[html2canvas] 로드 실패 (기다리던 중):', error);
+            html2canvasLoadPromise = null;
+            return false;
+        }
+    }
+    
+    // 새로운 로드 promise 생성
+    html2canvasLoadPromise = new Promise((resolve, reject) => {
+        console.log('[html2canvas] 스크립트 로드 시작');
+        
+        // 이미 스크립트 태그가 있는지 확인
+        const existingScript = document.querySelector('script[src*="html2canvas"]');
+        if (existingScript) {
+            console.log('[html2canvas] 기존 스크립트 태그 발견');
+            existingScript.remove(); // 기존 스크립트 제거
+        }
+        
         const script = document.createElement('script');
         script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+        script.id = 'html2canvas-script';
+        
+        let loadTimeout = setTimeout(() => {
+            console.error('[html2canvas] 로드 타임아웃');
+            reject(new Error('스크립트 로드 타임아웃'));
+        }, 10000);
+        
+        script.onload = () => {
+            clearTimeout(loadTimeout);
+            console.log('[html2canvas] 스크립트 태그 로드 완료');
+            
+            // 전역 객체 확인을 위해 약간 대기
+            setTimeout(() => {
+                if (window.html2canvas) {
+                    console.log('[html2canvas] 전역 객체 확인 완료');
+                    resolve(true);
+                } else {
+                    console.error('[html2canvas] 전역 객체를 찾을 수 없음');
+                    reject(new Error('전역 객체를 찾을 수 없음'));
+                }
+            }, 500);
+        };
+        
+        script.onerror = (error) => {
+            clearTimeout(loadTimeout);
+            console.error('[html2canvas] 스크립트 로드 에러:', error);
+            reject(new Error('스크립트 로드 실패'));
+        };
+        
         document.head.appendChild(script);
-        await new Promise((resolve, reject) => {
-            script.onload = resolve;
-            script.onerror = () => reject(new Error('Failed to load html2canvas'));
-            setTimeout(() => reject(new Error('Script load timeout')), 5000);
-        }).catch(err => {
-            showToast('이미지 캡처 라이브러리 로드 실패', 'error');
-            return;
-        });
+        console.log('[html2canvas] 스크립트 태그 추가됨');
+    });
+    
+    try {
+        const result = await html2canvasLoadPromise;
+        console.log('[html2canvas] 로드 성공');
+        return result;
+    } catch (error) {
+        console.error('[html2canvas] 로드 실패:', error);
+        html2canvasLoadPromise = null; // 다음 시도를 위해 리셋
+        showToast('이미지 캡처 라이브러리 로드 실패', 'error');
+        return false;
     }
+}
+
+// 스크린샷 기능  
+window.exportScreenshot = async () => {
+    console.log('[Screenshot] exportScreenshot 시작');
+    
+    // 전체 컨테이너 찾기
+    const container = document.querySelector('.container');
+    if (!container) {
+        console.error('[Screenshot] 컨테이너를 찾을 수 없음');
+        showToast('화면을 캡처할 수 없습니다', 'error');
+        return;
+    }
+    
+    // html2canvas 라이브러리 로드
+    console.log('[Screenshot] html2canvas 로드 시작');
+    const loaded = await loadHtml2Canvas();
+    if (!loaded || !window.html2canvas) {
+        console.error('[Screenshot] html2canvas 로드 실패');
+        showToast('스크린샷 라이브러리를 로드할 수 없습니다', 'error');
+        return;
+    }
+    console.log('[Screenshot] html2canvas 로드 완료');
+    
+    // 스타일 변수들
+    const originalScrollY = window.scrollY;
+    const originalStyles = [];
     
     try {
         // 스크롤 위치 초기화
-        const originalScrollY = window.scrollY;
         window.scrollTo(0, 0);
         
         // 모든 스크롤 가능 영역의 원래 스타일 저장
-        const scrollElements = container.querySelectorAll('#damage-stats-list, .damage-cards-container');
-        const originalStyles = [];
+        const scrollElements = container.querySelectorAll('#damage-stats-list, .damage-cards-container, .damage-list-container');
         
         scrollElements.forEach(el => {
             originalStyles.push({
@@ -2061,17 +2191,22 @@ window.exportScreenshot = async () => {
             el.style.height = 'auto';
         });
         
-        // 잠시 대기
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // 레이아웃 계산을 위해 잠시 대기
+        await new Promise(resolve => setTimeout(resolve, 200));
         
+        console.log('[Screenshot] canvas 생성 시작');
         const canvas = await html2canvas(container, {
             backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-color') || '#0f0f0f',
             scale: 2,
             height: container.scrollHeight,
             windowHeight: container.scrollHeight,
             scrollX: 0,
-            scrollY: -window.scrollY
+            scrollY: -window.scrollY,
+            logging: false,
+            useCORS: true,
+            allowTaint: true
         });
+        console.log('[Screenshot] canvas 생성 완료');
         
         // 원래 스타일로 복원
         originalStyles.forEach(style => {
@@ -2083,47 +2218,64 @@ window.exportScreenshot = async () => {
         // 스크롤 위치 복원
         window.scrollTo(0, originalScrollY);
         
+        // Blob 생성 및 다운로드
+        console.log('[Screenshot] 다운로드 준비');
         canvas.toBlob(blob => {
+            if (!blob) {
+                console.error('[Screenshot] Blob 생성 실패');
+                showToast('이미지 생성에 실패했습니다', 'error');
+                return;
+            }
+            
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `damage_meter_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.png`;
+            a.download = `mobi-meter_${new Date().getTime()}.png`;
             a.click();
             URL.revokeObjectURL(url);
+            console.log('[Screenshot] 다운로드 완료');
+            showToast('이미지가 다운로드되었습니다', 'success');
         });
     } catch (err) {
-        // console.error('스크린샷 실패:', err);
+        console.error('[Screenshot] 캡처 실패:', err);
+        showToast(`이미지 캡처 실패: ${err.message || '알 수 없는 오류'}`, 'error');
+        
         // 에러 발생 시에도 스타일 복원
-        const scrollElements = container.querySelectorAll('#damage-stats-list, .damage-cards-container');
-        scrollElements.forEach(el => {
-            el.style.overflow = '';
-            el.style.maxHeight = '';
-            el.style.height = '';
+        originalStyles.forEach(style => {
+            if (style.element) {
+                style.element.style.overflow = style.overflow;
+                style.element.style.maxHeight = style.maxHeight;
+                style.element.style.height = style.height;
+            }
         });
+        
+        // 스크롤 위치 복원
+        window.scrollTo(0, originalScrollY);
     }
 };
 
 
 // 클립보드에 이미지 복사
 window.copyToClipboard = async () => {
+    console.log('[Clipboard] copyToClipboard 시작');
+    
     // 전체 컨테이너 찾기
     const container = document.querySelector('.container');
-    if (!container) return;
+    if (!container) {
+        console.error('[Clipboard] 컨테이너를 찾을 수 없음');
+        showToast('화면을 캡처할 수 없습니다', 'error');
+        return;
+    }
     
     // html2canvas 라이브러리 로드
-    if (!window.html2canvas) {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
-        document.head.appendChild(script);
-        await new Promise((resolve, reject) => {
-            script.onload = resolve;
-            script.onerror = () => reject(new Error('Failed to load html2canvas'));
-            setTimeout(() => reject(new Error('Script load timeout')), 5000);
-        }).catch(err => {
-            showToast('이미지 캡처 라이브러리 로드 실패', 'error');
-            throw err;
-        });
+    console.log('[Clipboard] html2canvas 로드 시작');
+    const loaded = await loadHtml2Canvas();
+    if (!loaded || !window.html2canvas) {
+        console.error('[Clipboard] html2canvas 로드 실패');
+        showToast('스크린샷 라이브러리를 로드할 수 없습니다', 'error');
+        return;
     }
+    console.log('[Clipboard] html2canvas 로드 완료');
     
     try {
         // 스크롤 위치 초기화
@@ -2131,7 +2283,7 @@ window.copyToClipboard = async () => {
         window.scrollTo(0, 0);
         
         // 모든 스크롤 가능 영역의 원래 스타일 저장
-        const scrollElements = container.querySelectorAll('#damage-stats-list, .damage-cards-container');
+        const scrollElements = container.querySelectorAll('#damage-stats-list, .damage-cards-container, .damage-list-container');
         const originalStyles = [];
         
         scrollElements.forEach(el => {
@@ -2217,33 +2369,34 @@ window.copyToClipboard = async () => {
 
 // 모달 스크린샷 기능
 window.exportModalScreenshot = async () => {
+    console.log('[Modal Screenshot] exportModalScreenshot 시작');
+    
     const modal = document.querySelector('#detailModal .modal-content');
     const modalBody = document.querySelector('#detailModal .modal-body');
-    if (!modal || !modalBody) return;
-    
-    // html2canvas 라이브러리 로드
-    if (!window.html2canvas) {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
-        document.head.appendChild(script);
-        await new Promise((resolve, reject) => {
-            script.onload = resolve;
-            script.onerror = () => reject(new Error('Failed to load html2canvas'));
-            setTimeout(() => reject(new Error('Script load timeout')), 5000);
-        }).catch(err => {
-            showToast('이미지 캡처 라이브러리 로드 실패', 'error');
-            return;
-        });
+    if (!modal || !modalBody) {
+        console.error('[Modal Screenshot] 모달 요소를 찾을 수 없음');
+        showToast('모달을 캡처할 수 없습니다', 'error');
+        return;
     }
     
+    // html2canvas 라이브러리 로드
+    console.log('[Modal Screenshot] html2canvas 로드 시작');
+    const loaded = await loadHtml2Canvas();
+    if (!loaded || !window.html2canvas) {
+        console.error('[Modal Screenshot] html2canvas 로드 실패');
+        showToast('스크린샷 라이브러리를 로드할 수 없습니다', 'error');
+        return;
+    }
+    console.log('[Modal Screenshot] html2canvas 로드 완료');
+    
+    // 원래 스타일 저장
+    const originalOverflow = modalBody.style.overflow || '';
+    const originalMaxHeight = modalBody.style.maxHeight || '';
+    const originalHeight = modalBody.style.height || '';
+    const originalModalMaxHeight = modal.style.maxHeight || '';
+    const originalModalHeight = modal.style.height || '';
+    
     try {
-        // 현재 스타일 저장
-        const originalOverflow = modalBody.style.overflow || '';
-        const originalMaxHeight = modalBody.style.maxHeight || '';
-        const originalHeight = modalBody.style.height || '';
-        const originalModalMaxHeight = modal.style.maxHeight || '';
-        const originalModalHeight = modal.style.height || '';
-        
         // 스크롤 영역을 전체 표시로 변경
         modalBody.style.overflow = 'visible';
         modalBody.style.maxHeight = 'none';
@@ -2251,25 +2404,28 @@ window.exportModalScreenshot = async () => {
         modal.style.maxHeight = 'none';
         modal.style.height = 'auto';
         
-        // 잠시 대기 (레이아웃 계산을 위해)
+        // 레이아웃 계산을 위해 잠시 대기
         await new Promise(resolve => setTimeout(resolve, 200));
         
         // 전체 높이 계산
         const fullHeight = modal.scrollHeight;
         
         // 모달 전체 캡처
+        console.log('[Modal Screenshot] canvas 생성 시작');
         const canvas = await html2canvas(modal, {
-            backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-soft'),
+            backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-soft') || '#1a1a1a',
             scale: 2,
             scrollX: 0,
             scrollY: 0,
             useCORS: true,
             logging: false,
+            allowTaint: true,
             width: modal.scrollWidth,
             height: fullHeight,
             windowWidth: modal.scrollWidth,
             windowHeight: fullHeight
         });
+        console.log('[Modal Screenshot] canvas 생성 완료');
         
         // 스타일 원복
         modalBody.style.overflow = originalOverflow;
@@ -2278,16 +2434,28 @@ window.exportModalScreenshot = async () => {
         modal.style.maxHeight = originalModalMaxHeight;
         modal.style.height = originalModalHeight;
         
+        // Blob 생성 및 다운로드
+        console.log('[Modal Screenshot] 다운로드 준비');
         canvas.toBlob(blob => {
+            if (!blob) {
+                console.error('[Modal Screenshot] Blob 생성 실패');
+                showToast('이미지 생성에 실패했습니다', 'error');
+                return;
+            }
+            
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `detail_stats_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.png`;
+            a.download = `mobi-meter-detail_${new Date().getTime()}.png`;
             a.click();
             URL.revokeObjectURL(url);
+            console.log('[Modal Screenshot] 다운로드 완료');
+            showToast('모달 이미지가 다운로드되었습니다', 'success');
         });
     } catch (err) {
-        // console.error('모달 스크린샷 실패:', err);
+        console.error('[Modal Screenshot] 캡처 실패:', err);
+        showToast(`모달 캡처 실패: ${err.message || '알 수 없는 오류'}`, 'error');
+        
         // 스타일 원복
         modalBody.style.overflow = originalOverflow;
         modalBody.style.maxHeight = originalMaxHeight;
@@ -2299,24 +2467,25 @@ window.exportModalScreenshot = async () => {
 
 // 모달 클립보드 복사
 window.copyModalToClipboard = async () => {
+    console.log('[Modal Clipboard] copyModalToClipboard 시작');
+    
     const modal = document.querySelector('#detailModal .modal-content');
     const modalBody = document.querySelector('#detailModal .modal-body');
-    if (!modal || !modalBody) return;
+    if (!modal || !modalBody) {
+        console.error('[Modal Clipboard] 모달 요소를 찾을 수 없음');
+        showToast('모달을 캡처할 수 없습니다', 'error');
+        return;
+    }
     
     // html2canvas 라이브러리 로드
-    if (!window.html2canvas) {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
-        document.head.appendChild(script);
-        await new Promise((resolve, reject) => {
-            script.onload = resolve;
-            script.onerror = () => reject(new Error('Failed to load html2canvas'));
-            setTimeout(() => reject(new Error('Script load timeout')), 5000);
-        }).catch(err => {
-            showToast('이미지 캡처 라이브러리 로드 실패', 'error');
-            throw err;
-        });
+    console.log('[Modal Clipboard] html2canvas 로드 시작');
+    const loaded = await loadHtml2Canvas();
+    if (!loaded || !window.html2canvas) {
+        console.error('[Modal Clipboard] html2canvas 로드 실패');
+        showToast('스크린샷 라이브러리를 로드할 수 없습니다', 'error');
+        return;
     }
+    console.log('[Modal Clipboard] html2canvas 로드 완료');
     
     // 현재 스타일 저장 (try 블록 밖에서 선언)
     const originalOverflow = modalBody.style.overflow || '';
@@ -2473,6 +2642,11 @@ function onConnectionChanged(connected) {
                             userData = obj.data.user;
                         }
                         userTmpData = obj.data.user_tmp;
+                        
+                        // 서버 통계 데이터 저장
+                        if (obj.data.stats) {
+                            serverStats = obj.data.stats;
+                        }
                         
                         // 새로운 통계 데이터 저장 (슬라이딩 DPS, 버프 공격력/데미지 등)
                         if (obj.data.stats) {

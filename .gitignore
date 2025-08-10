@@ -40,18 +40,17 @@ Thumbs.db
 desktop.ini
 
 # Project specific
-settings.json
 *.log
 *.tmp
 .cache/
+nul
 
 # PyInstaller
-*.spec
+# *.spec  # build.spec은 유지
 admin.manifest
 
 # Claude Code settings
 .claude/
-CLAUDE.md
 
 # Executables
 *.exe
