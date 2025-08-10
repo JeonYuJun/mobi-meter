@@ -46,11 +46,12 @@ desktop.ini
 nul
 
 # PyInstaller
-# *.spec  # build.spec은 유지
+*.spec
 admin.manifest
 
 # Claude Code settings
 .claude/
+CLAUDE.md
 
 # Executables
 *.exe
