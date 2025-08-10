@@ -24,10 +24,13 @@ PORT = 6519    # WebSocket 서버 포트
 HTTP_PORT = 6520  # HTTP 서버 포트 (리소스 서빙용)
 IFACE = None   # 네트워크 인터페이스
 CONNECTED_CLIENTS = set()  # 연결된 클라이언트 추적
-LAST_CONNECTION_TIME = time.time()  # 마지막 연결 시간
+LAST_CONNECTION_TIME = 0  # 마지막 연결 시간 (0 = 타이머 비활성)
 
 # 전역 로거 객체 (나중에 초기화됨)
 logger = None
+
+# 전역 PacketStreamer 인스턴스 (싱글톤)
+global_streamer = None
 
 # 시스템 상수 정의
 class SystemConstants:
@@ -46,7 +49,7 @@ class SystemConstants:
     CLEANUP_INTERVAL = 300  # 5분마다 메모리 정리
     DATA_RETENTION = 1800  # 30분 이상 된 데이터 삭제
     STATUS_INTERVAL = 60  # 1분마다 상태 출력
-    AUTO_SHUTDOWN_DELAY = 30  # 연결이 없을 때 30초 후 자동 종료
+    AUTO_SHUTDOWN_DELAY = 60  # 연결이 없을 때 60초 후 자동 종료 (재연결 여유 시간)
 
 # 간단한 로거 (색상 지원)
 class SimpleLogger:
@@ -460,6 +463,12 @@ class PacketStreamer:
         self.tcp_segments = {}
         self.current_seq = None
         self.analyzer = CombatLogAnalyzer()
+        self.is_running = False
+        self.status_task = None
+        self.cleanup_task = None
+        self.process_task = None  # 패킷 처리 태스크
+        self.broadcast_task = None  # 데이터 브로드캐스트 태스크
+        self.connected_websockets = set()  # 연결된 웹소켓 추적
 
     # 상태 모니터링
     async def print_status(self):
@@ -483,24 +492,121 @@ class PacketStreamer:
                 if logger:
                     logger.log(f"상태 출력 오류: {e}", "ERROR")
     
+    # 패킷 캡처 시작 (한 번만 실행)
+    async def start_capture(self):
+        if not self.is_running:
+            self.is_running = True
+            self.sniffer.start()
+            self.status_task = asyncio.create_task(self.print_status())
+            self.cleanup_task = asyncio.create_task(self.analyzer.cleanup_old_data())
+            self.process_task = asyncio.create_task(self._process())  # 패킷 처리 태스크
+            self.broadcast_task = asyncio.create_task(self._process2())  # 브로드캐스트 태스크
+            if logger:
+                logger.log("패킷 캡처 시작", "INFO")
+    
+    # 패킷 캡처 중지
+    async def stop_capture(self):
+        if self.is_running:
+            self.is_running = False
+            if self.status_task:
+                self.status_task.cancel()
+            if self.cleanup_task:
+                self.cleanup_task.cancel()
+            if self.process_task:
+                self.process_task.cancel()
+            if self.broadcast_task:
+                self.broadcast_task.cancel()
+            self.sniffer.stop()
+            if logger:
+                logger.log("패킷 캡처 중지", "INFO")
+            self.sniffer.join()
+    
+    # 클라이언트 연결 추가
+    async def add_client(self, websocket):
+        self.connected_websockets.add(websocket)
+        await self.start_capture()  # 첫 클라이언트 연결 시 캡처 시작
+        
+        # 새 클라이언트에게 현재 데이터 즉시 전송
+        try:
+            # 플래그 임시 저장
+            original_data_changed = self.analyzer._data_changed
+            original_user_updated = self.analyzer._is_user_data_updated
+            
+            # 강제 전송을 위한 플래그 설정
+            self.analyzer._data_changed = True  # send_data가 실행되도록
+            self.analyzer._is_user_data_updated = True  # user 데이터 포함되도록
+            
+            await self.analyzer.send_data(websocket)
+            
+            # 원래 플래그 복원
+            self.analyzer._data_changed = original_data_changed
+            # _is_user_data_updated는 send_data에서 False로 변경되므로 복원 불필요
+            
+            if logger:
+                logger.log("새 클라이언트에게 초기 데이터 전송 완료", "DEBUG")
+        except Exception as e:
+            if logger:
+                logger.log(f"초기 데이터 전송 실패: {e}", "DEBUG")
+    
+    # 클라이언트 연결 제거
+    async def remove_client(self, websocket):
+        self.connected_websockets.discard(websocket)
+        if not self.connected_websockets:  # 모든 클라이언트가 연결 해제되면
+            await self.stop_capture()  # 캡처 중지
+    
+    # 데이터 초기화 (clear 명령 처리)
+    def clear_data(self):
+        # CombatLogAnalyzer 초기화
+        self.analyzer._raw_data.clear()
+        self.analyzer._damage_by_user_by_target_by_skill = {0:{0:{"": CombatDetailData()}}}
+        self.analyzer._self_damage_by_user_by_target_by_skill = {0:{0:{"": CombatDetailData()}}}
+        self.analyzer._buff_uptime_by_user_by_target_by_skill = {0:{0:{"": {"": BuffUptimeData()}}}}
+        self.analyzer._buff_by_user_by_inst.clear()
+        self.analyzer._time_data.clear()
+        self.analyzer._enemy_data = EnemyData()
+        self.analyzer._user_tmp_data.clear()
+        self.analyzer._user_data.clear()
+        self.analyzer._self_damage_by_user.clear()
+        self.analyzer._max_self_damage_by_user = SimpleDamageData()
+        self.analyzer._data_changed = True
+        self.analyzer._cached_json_data = None
+        self.analyzer._last_combat_time = time.time()
+        
+        # PacketStreamer 버퍼 초기화
+        self.buffer = b''
+        self.tcp_segments.clear()
+        self.current_seq = None
+        
+        if logger:
+            logger.log("전투 데이터 초기화 완료", "INFO")
+    
     # WebSocket 클라이언트에게 데이터 스트리밍
     async def stream(self, websocket) -> None:
-        self.sniffer.start()
-        consumer_task = asyncio.create_task(self._process(websocket))
-        consumer_task2 = asyncio.create_task(self._process2(websocket))
-        status_task = asyncio.create_task(self.print_status())
-        cleanup_task = asyncio.create_task(self.analyzer.cleanup_old_data())
+        await self.add_client(websocket)
+        # 각 클라이언트는 메시지 핸들링만 담당
+        message_task = asyncio.create_task(self._handle_messages(websocket))
         try:
             await websocket.wait_closed()
         finally:
-            consumer_task.cancel()
-            consumer_task2.cancel()
-            status_task.cancel()
-            cleanup_task.cancel()
-            self.sniffer.stop()
+            message_task.cancel()
+            await self.remove_client(websocket)
+    
+    # WebSocket 메시지 처리
+    async def _handle_messages(self, websocket) -> None:
+        try:
+            async for message in websocket:
+                if message == "clear":
+                    self.clear_data()
+                    # 클리어 확인 메시지 전송
+                    await websocket.send(json.dumps({
+                        "type": "clear_confirmed",
+                        "timestamp": time.time()
+                    }))
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
             if logger:
-                logger.log("스트리밍 종료", "INFO")
-            self.sniffer.join()
+                logger.log(f"메시지 처리 오류: {e}", "ERROR")
 
     def _enqueue_packet(self, pkt: Packet) -> None:
         self.loop.call_soon_threadsafe(self.queue.put_nowait, pkt)
@@ -565,7 +671,7 @@ class PacketStreamer:
         return (res, pivot)
     
     # TCP 패킷을 수집하고 재조립하는 메인 프로세스
-    async def _process(self, websocket) -> None:
+    async def _process(self) -> None:
         while True:
             try:
                 pkt: Packet = await self.queue.get()
@@ -630,10 +736,17 @@ class PacketStreamer:
                         # 디버그 모드가 아니면 계속 실행
 
     # 분석된 데이터를 주기적으로 WebSocket으로 전송
-    async def _process2(self, websocket) -> None:
+    async def _process2(self) -> None:
         while True:
             try:
-                await self.analyzer.send_data(websocket)
+                # 모든 연결된 클라이언트에게 브로드캐스트
+                for ws in list(self.connected_websockets):
+                    try:
+                        await self.analyzer.send_data(ws)
+                    except Exception as e:
+                        # 개별 클라이언트 전송 실패 시 무시
+                        if logger and DEBUG:
+                            logger.log(f"클라이언트 전송 실패: {e}", "DEBUG")
                 
                 # 전투 상태에 따라 전송 주기 조절
                 if self.analyzer._data_changed:
@@ -1499,25 +1612,36 @@ async def main() -> None:
     logger.log(f"브라우저에서 http://localhost:{HTTP_PORT} 접속하세요", "INFO")
     
     async def wsserve(websocket) -> None:
-        global CONNECTED_CLIENTS, LAST_CONNECTION_TIME
+        global CONNECTED_CLIENTS, LAST_CONNECTION_TIME, global_streamer
         client_ip = websocket.remote_address[0]
         if DEBUG:
             logger.log(f"클라이언트 연결: {client_ip}", "IMPORTANT")
         
         # 클라이언트 추가
         CONNECTED_CLIENTS.add(websocket)
-        LAST_CONNECTION_TIME = time.time()
+        # 클라이언트가 있으면 타이머 리셋 (중요!)
+        if len(CONNECTED_CLIENTS) > 0:
+            LAST_CONNECTION_TIME = 0  # 타이머 완전 리셋
         logger.log(f"새 클라이언트 연결됨 [{client_ip}] | 총 {len(CONNECTED_CLIENTS)}명 접속 중", "SUCCESS")
         
         try:
-            streamer = PacketStreamer()
-            await streamer.stream(websocket)
+            # 전역 PacketStreamer 사용 (싱글톤)
+            if global_streamer is None:
+                global_streamer = PacketStreamer()
+                logger.log("전역 PacketStreamer 생성", "INFO")
+            
+            await global_streamer.stream(websocket)
         finally:
             # 클라이언트 제거
             CONNECTED_CLIENTS.discard(websocket)
             logger.log(f"클라이언트 연결 해제 [{client_ip}] | 남은 접속자: {len(CONNECTED_CLIENTS)}명", "WARNING")
             
-            if len(CONNECTED_CLIENTS) == 0:
+            # 클라이언트가 남아있으면 타이머 리셋
+            if len(CONNECTED_CLIENTS) > 0:
+                LAST_CONNECTION_TIME = 0  # 타이머 리셋
+            else:
+                # 완전히 비었을 때만 타이머 시작
+                LAST_CONNECTION_TIME = time.time()  # 현재 시간 설정
                 logger.log(f"{SystemConstants.AUTO_SHUTDOWN_DELAY}초 후 자동 종료...", "WARNING")
         
     # HTTP 서버 설정 및 시작
@@ -1551,6 +1675,10 @@ async def main() -> None:
         while True:
             await asyncio.sleep(5)  # 5초마다 체크
             
+            # LAST_CONNECTION_TIME이 0이면 타이머 비활성 상태
+            if LAST_CONNECTION_TIME == 0:
+                continue
+                
             if len(CONNECTED_CLIENTS) == 0:
                 idle_time = time.time() - LAST_CONNECTION_TIME
                 remaining = SystemConstants.AUTO_SHUTDOWN_DELAY - idle_time
@@ -1636,6 +1764,7 @@ async def stable_main() -> None:
 if __name__ == '__main__':
     import sys
     import os
+    import traceback
     
     # 임시 로거 객체 생성 (설정 파일 로드 전까지 사용)
     temp_logger = SimpleLogger(debug=False)
@@ -1678,4 +1807,13 @@ if __name__ == '__main__':
     logger = SimpleLogger(DEBUG)
     
     # 안정적인 메인 함수 실행 (자동 재시작 포함)
-    asyncio.run(stable_main())
+    try:
+        asyncio.run(stable_main())
+    except Exception as e:
+        print(f"\n[치명적 오류] {e}")
+        print("\n상세 오류 정보:")
+        traceback.print_exc()
+    finally:
+        # 콘솔 창 유지 (exe 실행 시 오류 확인용)
+        print("\n프로그램이 종료되었습니다. Enter 키를 누르세요...")
+        input()

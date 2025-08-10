@@ -284,6 +284,12 @@ function updateUserDpsHistory() {
     for (const uid in db) {
         if (db[uid] && db[uid][tid]) {
             const userStats = db[uid][tid];
+            
+            // 안전한 접근 - undefined 체크 추가
+            if (!userStats[""] || !userStats[""].all) {
+                continue;  // 데이터가 없으면 건너뜀
+            }
+            
             const totalDamage = userStats[""].all.total_damage || 0;
             const runtime = getRuntimeSec();
             const currentDps = runtime > 0 ? Math.floor(totalDamage / runtime) : 0;
@@ -2584,6 +2590,7 @@ setInterval(() => {
 // ========== WebSocket 연결 관리 ==========
 // IIFE 제거하여 전역 스코프에서 새로운 UI 기능 접근 가능하도록 함
 let isWebSocketConnected = false;
+let isReconnecting = false;  // 재연결 중 플래그 추가
 
 // WebSocket 연결 상태 변경 핸들러
 function onConnectionChanged(connected) {
@@ -2604,21 +2611,39 @@ function onConnectionChanged(connected) {
         }
     }
     document.getElementById('clearBtn').onclick = () => {
+        // 재연결 중이면 무시
+        if (isReconnecting) return;
+        
         // 모든 데이터 초기화
         clearDB();
         
-        // WebSocket 재연결로 서버 데이터도 초기화
+        // 서버에 clear 명령 전송
         if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.close();
+            ws.send('clear');
+            // UI 즉시 업데이트
+            renderDamageRanks();
+        } else {
+            // 연결이 없으면 연결 후 clear
+            connect();
+            setTimeout(() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send('clear');
+                }
+            }, 100);
+            // 새 연결 시 렌더링
+            renderDamageRanks();
         }
-        connect();
-        
-        // UI 렌더링
-        renderDamageRanks();
+        // 즉시 렌더링 제거 (재연결 후에만 렌더링)
     };
 
     // WebSocket 연결 함수
     function connect() {
+        // 이미 연결 중이거나 연결되어 있으면 무시
+        if (ws && (ws.readyState === WebSocket.CONNECTING || 
+                   ws.readyState === WebSocket.OPEN)) {
+            return;
+        }
+        
         ws = new WebSocket(wsUrl);
 
         // 연결 성공 이벤트
@@ -2631,6 +2656,10 @@ function onConnectionChanged(connected) {
             try {
                 const obj = JSON.parse(event.data);
                 switch (obj.type) {
+                    case "clear_confirmed":
+                        // 서버에서 clear 확인 메시지
+                        console.log('서버 데이터 초기화 완료');
+                        break;
                     case "damage":
                         damageDB   = obj.data.damage;
                         damageDB2  = obj.data.damage2;
