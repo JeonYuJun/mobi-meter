@@ -1,6 +1,10 @@
 // ========== 전역 변수 및 초기 설정 ==========
 const wsUrl = "ws://localhost:6519";
-let ws;
+let ws = null;
+let reconnectInterval = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const RECONNECT_DELAY = 3000; // 3초
 
 // 데미지 및 버프 데이터베이스
 let damageDB  = {0:{0:{"":{}}}}  // 메인 데미지 DB
@@ -2758,7 +2762,7 @@ function onConnectionChanged(connected) {
     }
     document.getElementById('clearBtn').onclick = () => {
         // 재연결 중이면 무시
-        if (isReconnecting) return;
+        if (reconnectInterval) return;
         
         // 모든 데이터 초기화
         clearDB();
@@ -2795,12 +2799,19 @@ function onConnectionChanged(connected) {
         // 연결 성공 이벤트
         ws.onopen = () => {
             onConnectionChanged(true);
+            reconnectAttempts = 0; // 재연결 시도 횟수 초기화
+            
+            // 재연결 인터벌 정리
+            if (reconnectInterval) {
+                clearInterval(reconnectInterval);
+                reconnectInterval = null;
+            }
             
             // 페이지 로드/새로고침 시 자동 초기화
             clearDB();  // 클라이언트 데이터 초기화
             ws.send('clear');  // 서버에 초기화 명령
             renderDamageRanks();  // UI 업데이트
-            console.log('페이지 로드 - 자동 초기화 완료');
+            console.log('WebSocket 연결 성공');
         };
 
         // 메시지 수신 이벤트 (서버로부터 데이터 받기)
@@ -2858,14 +2869,64 @@ function onConnectionChanged(connected) {
         };
 
         // 연결 종료 이벤트
-        ws.onclose = () => {
+        ws.onclose = (event) => {
             onConnectionChanged(false);
+            ws = null;
+            
+            // 정상 종료가 아니면 자동 재연결 시도
+            if (event.code !== 1000 && event.code !== 1001) {
+                console.log(`WebSocket 연결 종료 (코드: ${event.code}). 재연결 시도...`);
+                startReconnect();
+            } else {
+                console.log('WebSocket 정상 종료');
+            }
         };
 
         ws.onerror = (err) => {
             onConnectionChanged(false);
+            console.error('WebSocket 오류:', err);
         };
     }
+
+    // 자동 재연결 함수
+    function startReconnect() {
+        if (reconnectInterval) return; // 이미 재연결 중이면 무시
+        
+        reconnectInterval = setInterval(() => {
+            if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+                console.log('최대 재연결 시도 횟수 초과. 재연결 중단.');
+                clearInterval(reconnectInterval);
+                reconnectInterval = null;
+                reconnectAttempts = 0;
+                return;
+            }
+            
+            reconnectAttempts++;
+            console.log(`재연결 시도 ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}...`);
+            connect();
+        }, RECONNECT_DELAY);
+    }
+
+    // 페이지 가시성 변경 감지 (탭 전환 시)
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && (!ws || ws.readyState !== WebSocket.OPEN)) {
+            console.log('페이지 활성화 - WebSocket 재연결 시도');
+            connect();
+        }
+    });
+
+    // 온라인/오프라인 상태 감지
+    window.addEventListener('online', () => {
+        console.log('네트워크 연결됨 - WebSocket 재연결 시도');
+        connect();
+    });
+
+    window.addEventListener('offline', () => {
+        console.log('네트워크 연결 끊김');
+        if (ws) {
+            ws.close();
+        }
+    });
 
     connect();
     

@@ -15,7 +15,7 @@ from aiohttp import web
 import aiohttp_cors
 
 # 버전 정보
-__version__ = "1.2.3"
+__version__ = "1.2.4"
 __description__ = "Mabinogi Real-time Damage Meter"
 
 # 전역 설정 변수
@@ -572,8 +572,16 @@ class PacketStreamer:
         message_task = asyncio.create_task(self._handle_messages(websocket))
         try:
             await websocket.wait_closed()
+        except Exception as e:
+            error_msg = str(e)
+            if logger and "1000" not in error_msg and "1001" not in error_msg:
+                logger.log(f"WebSocket 스트림 오류: {e}", "DEBUG")
         finally:
             message_task.cancel()
+            try:
+                await message_task
+            except asyncio.CancelledError:
+                pass
             await self.remove_client(websocket)
     
     # WebSocket 메시지 처리
@@ -583,15 +591,21 @@ class PacketStreamer:
                 if message == "clear":
                     self.clear_data()
                     # 클리어 확인 메시지 전송
-                    await websocket.send(json.dumps({
-                        "type": "clear_confirmed",
-                        "timestamp": time.time()
-                    }))
+                    try:
+                        await websocket.send(json.dumps({
+                            "type": "clear_confirmed",
+                            "timestamp": time.time()
+                        }))
+                    except Exception:
+                        pass  # 전송 실패 무시
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            if logger:
-                logger.log(f"메시지 처리 오류: {e}", "ERROR")
+            error_msg = str(e)
+            # 정상적인 연결 종료는 무시
+            if "1000" not in error_msg and "1001" not in error_msg:
+                if logger:
+                    logger.log(f"메시지 처리 오류: {e}", "ERROR")
 
     def _enqueue_packet(self, pkt: Packet) -> None:
         self.loop.call_soon_threadsafe(self.queue.put_nowait, pkt)
@@ -729,9 +743,16 @@ class PacketStreamer:
                     try:
                         await self.analyzer.send_data(ws)
                     except Exception as e:
-                        # 개별 클라이언트 전송 실패 시 무시
+                        error_msg = str(e)
+                        # 개별 클라이언트 전송 실패 처리
                         if logger and DEBUG:
-                            logger.log(f"클라이언트 전송 실패: {e}", "DEBUG")
+                            if "1001" in error_msg or "1011" in error_msg or "keepalive" in error_msg.lower():
+                                # 연결 종료 관련 에러는 DEBUG 레벨로
+                                logger.log(f"클라이언트 연결 종료됨", "DEBUG")
+                            else:
+                                logger.log(f"클라이언트 전송 실패: {e}", "DEBUG")
+                        # 연결이 끊긴 클라이언트는 제거
+                        self.connected_websockets.discard(ws)
                 
                 # 전투 상태에 따라 전송 주기 조절
                 if self.analyzer._data_changed:
@@ -1618,6 +1639,15 @@ async def main() -> None:
                 logger.log("전역 PacketStreamer 생성", "INFO")
             
             await global_streamer.stream(websocket)
+        except Exception as e:
+            # WebSocket 에러 처리 개선
+            error_msg = str(e)
+            if "1001" in error_msg:
+                logger.log(f"클라이언트가 정상적으로 연결을 종료했습니다 [{client_ip}]", "INFO")
+            elif "1011" in error_msg or "keepalive" in error_msg.lower():
+                logger.log(f"클라이언트 응답 시간 초과 [{client_ip}] - 네트워크 지연 또는 클라이언트 문제", "WARNING")
+            else:
+                logger.log(f"WebSocket 오류 [{client_ip}]: {error_msg}", "ERROR")
         finally:
             # 클라이언트 제거
             CONNECTED_CLIENTS.discard(websocket)
@@ -1677,9 +1707,17 @@ async def main() -> None:
                 elif remaining <= 10:
                     logger.log(f"{int(remaining)}초 후 자동 종료...", "INFO")
     
-    # WebSocket 서버 시작
-    ws_server = await serve(wsserve, '0.0.0.0', PORT, max_size=10_000_000)
-    logger.log(f"WebSocket 서버 시작 완료 - 포트: {PORT}", "IMPORTANT")
+    # WebSocket 서버 시작 (ping/pong 설정 추가)
+    ws_server = await serve(
+        wsserve, 
+        '0.0.0.0', 
+        PORT, 
+        max_size=10_000_000,
+        ping_interval=30,  # 30초마다 ping 전송
+        ping_timeout=10,   # 10초 내 pong 응답 대기
+        close_timeout=10   # 연결 종료 시 10초 대기
+    )
+    logger.log(f"WebSocket 서버 시작 완료 - 포트: {PORT} (Ping 간격: 30초)", "IMPORTANT")
     logger.log("실시간 데미지 측정 대기중...", "INFO")
     logger.log("관리자 권한으로 실행하세요", "WARNING")
     print("="*70)
