@@ -73,9 +73,18 @@ function initDPSChart() {
         return;
     }
     
-    // Chart.js zoom 플러그인 등록
-    if (typeof Chart.register === 'function' && window.ChartZoom) {
-        Chart.register(window.ChartZoom);
+    // Chart.js zoom 플러그인 등록 - 안전하게 처리
+    if (typeof Chart.register === 'function') {
+        // zoom 플러그인이 로드되었는지 확인
+        if (typeof window.ChartZoom !== 'undefined') {
+            try {
+                Chart.register(window.ChartZoom);
+            } catch (e) {
+                console.warn('Zoom plugin registration warning:', e);
+            }
+        } else {
+            console.warn('Chart.js zoom plugin not loaded yet');
+        }
     }
     
     try {
@@ -84,6 +93,18 @@ function initDPSChart() {
             // console.error('Canvas context를 가져올 수 없습니다');
             return;
         }
+        
+        // 더블클릭 이벤트 리스너 추가
+        canvas.addEventListener('dblclick', function(e) {
+            if (dpsChart && dpsChart.resetZoom) {
+                dpsChart.resetZoom('default');
+                // UI 업데이트
+                const indicator = document.getElementById('zoomIndicator');
+                const resetBtn = document.getElementById('resetZoomBtn');
+                if (indicator) indicator.style.display = 'none';
+                if (resetBtn) resetBtn.style.display = 'none';
+            }
+        });
         
         dpsChart = new Chart(ctx, {
         type: 'line',
@@ -98,11 +119,11 @@ function initDPSChart() {
                 duration: 0
             },
             interaction: {
-                mode: 'index',
-                intersect: false,
+                mode: 'nearest',  // index에서 nearest로 변경 (더 안정적)
+                intersect: true,  // false에서 true로 변경 (tooltip 오류 방지)
                 hover: {
                     mode: 'nearest',
-                    axis: 'x'
+                    intersect: true
                 }
             },
             plugins: {
@@ -142,6 +163,7 @@ function initDPSChart() {
                     }
                 },
                 tooltip: {
+                    enabled: true,
                     backgroundColor: 'rgba(0, 0, 0, 0.8)',
                     titleColor: '#fff',
                     bodyColor: '#fff',
@@ -149,9 +171,29 @@ function initDPSChart() {
                     borderWidth: 1,
                     padding: 10,
                     displayColors: true,
+                    intersect: true,  // false에서 true로 변경
+                    mode: 'nearest',  // index에서 nearest로 변경
+                    filter: function(tooltipItem) {
+                        // null/undefined 데이터 필터링
+                        return tooltipItem && tooltipItem.parsed !== undefined && tooltipItem.parsed.y !== null;
+                    },
                     callbacks: {
                         label: function(context) {
-                            return context.dataset.label + ': ' + context.parsed.y.toLocaleString() + ' DPS';
+                            try {
+                                if (!context || !context.dataset || 
+                                    context.parsed === undefined || context.parsed === null ||
+                                    context.parsed.y === undefined || context.parsed.y === null) {
+                                    return '';
+                                }
+                                const value = context.parsed.y;
+                                const label = context.dataset.label || '';
+                                return label + ': ' + value.toLocaleString() + ' DPS';
+                            } catch (e) {
+                                return '';
+                            }
+                        },
+                        beforeLabel: function(context) {
+                            return '';
                         }
                     }
                 },
@@ -163,38 +205,75 @@ function initDPSChart() {
                     zoom: {
                         wheel: {
                             enabled: true,
-                            speed: 0.1,
-                            modifierKey: null
+                            speed: 0.1
                         },
                         pinch: {
                             enabled: true
                         },
-                        mode: 'x',
                         drag: {
-                            enabled: false
+                            enabled: true,  // 드래그로 구간 확대
+                            backgroundColor: 'rgba(100, 100, 100, 0.1)',
+                            borderColor: 'rgba(255, 255, 255, 0.3)',
+                            borderWidth: 1,
+                            threshold: 10
                         },
-                        onZoomStart: function({chart}) {
-                            chart.isZooming = true;
-                            // 줌 표시기 보이기
-                            const indicator = document.getElementById('zoomIndicator');
-                            if (indicator) {
-                                indicator.style.display = 'inline-block';
+                        mode: 'x',  // x축만 줌 (시간축)
+                        onZoomStart: function(context) {
+                            try {
+                                if (!context || !context.chart || !context.chart.canvas) return false;
+                                const chart = context.chart;
+                                
+                                // Chart.js 내부 메서드 체크
+                                if (!chart.scales || !chart.scales.x || !chart.scales.y) return false;
+                                
+                                chart.isZooming = true;
+                                
+                                // 줌 표시기 보이기
+                                const indicator = document.getElementById('zoomIndicator');
+                                if (indicator) {
+                                    indicator.style.display = 'inline-block';
+                                }
+                            } catch (e) {
+                                console.error('Zoom start error:', e);
+                                return false;
                             }
                         },
-                        onZoomComplete: function({chart}) {
-                            chart.isZooming = false;
-                            // 줌 레벨 확인
-                            const xScale = chart.scales.x;
-                            const isZoomed = xScale.min !== xScale.options.min || xScale.max !== xScale.options.max;
-                            
-                            const indicator = document.getElementById('zoomIndicator');
-                            if (indicator) {
-                                indicator.style.display = isZoomed ? 'inline-block' : 'none';
+                        onZoomComplete: function(context) {
+                            try {
+                                if (!context || !context.chart || !context.chart.canvas) return;
+                                const chart = context.chart;
+                                
+                                // Chart.js 내부 메서드 체크
+                                if (!chart.scales || !chart.scales.x || !chart.scales.y) return;
+                                
+                                chart.isZooming = false;
+                                
+                                // 줌 레벨 확인
+                                const xScale = chart.scales.x;
+                                const isZoomed = xScale.min !== xScale.options.min || xScale.max !== xScale.options.max;
+                                
+                                // 줌 표시기와 리셋 버튼 표시/숨김
+                                const indicator = document.getElementById('zoomIndicator');
+                                const resetBtn = document.getElementById('resetZoomBtn');
+                                if (indicator) {
+                                    indicator.style.display = isZoomed ? 'inline-block' : 'none';
+                                }
+                                if (resetBtn) {
+                                    resetBtn.style.display = isZoomed ? 'inline-block' : 'none';
+                                }
+                                
+                                // 줌 레벨이 매우 낮으면 자동 리셋 (거의 전체 보기)
+                                if (isZoomed && xScale.max - xScale.min >= (xScale.options.max - xScale.options.min) * 0.95) {
+                                    // 95% 이상 확대된 상태면 자동 리셋
+                                    chart.resetZoom('none');
+                                }
+                            } catch (e) {
+                                console.error('Zoom complete error:', e);
                             }
                         }
                     },
                     pan: {
-                        enabled: false
+                        enabled: false  // Pan 기능 비활성화 (제대로 작동하지 않음)
                     }
                 }
             },
@@ -394,14 +473,27 @@ function initMiniDPSChart(uid) {
                     backgroundColor: 'rgba(0, 0, 0, 0.8)',
                     titleColor: '#fff',
                     bodyColor: '#fff',
+                    intersect: false,
+                    mode: 'index',
                     callbacks: {
                         title: function(context) {
-                            const index = context[0].dataIndex;
-                            const seconds = index * 5;
-                            return `${Math.floor(seconds/60)}:${(seconds%60).toString().padStart(2,'0')}`;
+                            try {
+                                if (!context || !context.length || !context[0]) return '';
+                                const index = context[0].dataIndex;
+                                const seconds = index * 5;
+                                return `${Math.floor(seconds/60)}:${(seconds%60).toString().padStart(2,'0')}`;
+                            } catch (e) {
+                                return '';
+                            }
                         },
                         label: function(context) {
-                            return context.parsed.y.toLocaleString() + ' DPS';
+                            try {
+                                if (!context || context.parsed === undefined || context.parsed === null ||
+                                    context.parsed.y === undefined || context.parsed.y === null) return '';
+                                return context.parsed.y.toLocaleString() + ' DPS';
+                            } catch (e) {
+                                return '';
+                            }
                         }
                     }
                 },
@@ -412,6 +504,12 @@ function initMiniDPSChart(uid) {
                         },
                         pinch: {
                             enabled: false
+                        },
+                        onDoubleClick: function(context) {
+                            // 더블클릭으로 줌 리셋
+                            if (context && context.chart) {
+                                context.chart.resetZoom('default');
+                            }
                         }
                     },
                     pan: {
@@ -510,16 +608,23 @@ function updateDPSChart() {
     }
     dpsChart.data.labels.push(combatTime);
     
-    // 데이터셋 업데이트 또는 생성 - 더 구분 가능한 색상
-    const colors = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#95E77E', '#B19CD9', '#FF9A8B', '#6C88C4', '#FFB347'];
-    const top5 = sorted.slice(0, 5);
+    // 데이터셋 업데이트 또는 생성 - 확장된 색상 팔레트 (12개)
+    const colors = [
+        '#FF6B6B', '#4ECDC4', '#FFE66D', '#95E77E', 
+        '#B19CD9', '#FF9A8B', '#6C88C4', '#FFB347',
+        '#77DD77', '#AEC6CF', '#FFB6C1', '#FDFD96'
+    ];
+    
+    // 차트에 표시할 최대 인원 (설정 가능)
+    const maxChartUsers = parseInt(localStorage.getItem('maxChartUsers') || '12');
+    const topUsers = sorted.slice(0, Math.min(maxChartUsers, sorted.length));
     
     // 전체 평균 DPS 계산
     let totalDpsSum = 0;
     let totalCount = 0;
     
     // 기존 데이터셋 업데이트
-    const newDatasets = top5.map(([user_id, item], idx) => {
+    const newDatasets = topUsers.map(([user_id, item], idx) => {
         const total = item[""].all.total_damage || 0;
         // 첫 데이터일 때는 0으로 처리하여 이상값 방지
         const runtime = getRuntimeSec();
@@ -591,33 +696,72 @@ function updateDPSChart() {
     
     // 차트 업데이트 (줌 상태 유지)
     if (dpsChart && !dpsChart.isZooming) {
-        dpsChart.update('none');
+        try {
+            // 차트가 삭제되지 않았고 canvas가 연결되어 있는지 확인
+            if (dpsChart.canvas && dpsChart.canvas.parentNode) {
+                // tooltip을 잘못 업데이트시 트리거처 해제
+                if (dpsChart.options && dpsChart.options.plugins && dpsChart.options.plugins.tooltip) {
+                    // 업데이트 전 tooltip 숨기기
+                    if (dpsChart.tooltip) {
+                        dpsChart.tooltip._active = [];
+                        dpsChart.tooltip.update(true);
+                    }
+                }
+                dpsChart.update('none');
+            }
+        } catch (e) {
+            console.error('Chart update error:', e);
+            // 차트 재초기화 필요
+            chartInitialized = false;
+            dpsChart = null;
+        }
     }
 }
 
 // 차트 줌 리셋 함수 (애니메이션 포함)
 function resetChartZoom() {
-    if (dpsChart) {
+    try {
+        if (!dpsChart || !dpsChart.resetZoom) {
+            console.warn('Chart not initialized or zoom plugin not available');
+            return;
+        }
+        
         // 줌 상태 플래그 해제
         dpsChart.isZooming = false;
         
-        // 줌 리셋 (애니메이션)
-        dpsChart.resetZoom('default');
+        // 줌 리셋 (애니메이션) - try-catch로 감싸기
+        try {
+            dpsChart.resetZoom('default');
+        } catch (e) {
+            console.error('Error resetting zoom:', e);
+            // 대체 방법: 차트 재렌더링
+            if (dpsChart.update) {
+                dpsChart.update();
+            }
+        }
         
-        // 버튼에 시각적 피드백
-        const button = event.currentTarget;
-        if (button) {
-            button.style.transform = 'scale(0.95)';
-            button.style.transition = 'transform 0.1s';
-            setTimeout(() => {
-                button.style.transform = 'scale(1)';
-            }, 100);
+        // 버튼에 시각적 피드백 (event 객체 안전하게 처리)
+        if (typeof event !== 'undefined' && event.currentTarget) {
+            const button = event.currentTarget;
+            if (button) {
+                button.style.transform = 'scale(0.95)';
+                button.style.transition = 'transform 0.1s';
+                setTimeout(() => {
+                    if (button) {
+                        button.style.transform = 'scale(1)';
+                    }
+                }, 100);
+            }
         }
         
         // 줌 표시기 숨기기
         const indicator = document.getElementById('zoomIndicator');
+        const resetBtn = document.getElementById('resetZoomBtn');
         if (indicator) {
             indicator.style.display = 'none';
+        }
+        if (resetBtn) {
+            resetBtn.style.display = 'none';
         }
         
         // 차트 업데이트 재개를 위한 플래그 리셋
@@ -627,6 +771,8 @@ function resetChartZoom() {
                 // console.log('차트 줌 초기화 완료 - 실시간 업데이트 재개');
             }
         }, 300);
+    } catch (error) {
+        console.error('Error in resetChartZoom:', error);
     }
 }
 
@@ -2743,6 +2889,73 @@ function onConnectionChanged(connected) {
     // ========== DOM 이벤트 리스너 설정 ==========
     // DOM이 완전히 로드된 후에 실행
     function setupEventListeners() {
+        // 차트 컨트롤 버튼 이벤트
+        const resetZoomBtn = document.getElementById('resetZoomBtn');
+        if (resetZoomBtn) {
+            resetZoomBtn.onclick = (event) => {
+                try {
+                    if (!dpsChart) {
+                        console.warn('Chart not initialized');
+                        return;
+                    }
+                    
+                    // 차트 인스턴스와 zoom 플러그인 확인
+                    if (!dpsChart.resetZoom || typeof dpsChart.resetZoom !== 'function') {
+                        console.warn('Zoom plugin not available');
+                        // 대체: 차트 업데이트로 시도
+                        if (dpsChart.update) {
+                            dpsChart.update();
+                        }
+                        return;
+                    }
+                    
+                    // 안전하게 zoom 리셋
+                    try {
+                        dpsChart.resetZoom('default');
+                    } catch (e) {
+                        console.error('Error resetting zoom:', e);
+                        // 대체: 차트 재렌더링
+                        if (dpsChart.update) {
+                            dpsChart.update();
+                        }
+                    }
+                    
+                    // UI 업데이트
+                    resetZoomBtn.style.display = 'none';
+                    const indicator = document.getElementById('zoomIndicator');
+                    if (indicator) {
+                        indicator.style.display = 'none';
+                    }
+                    
+                    // 버튼 클릭 피드백
+                    resetZoomBtn.style.transform = 'scale(0.95)';
+                    setTimeout(() => {
+                        resetZoomBtn.style.transform = 'scale(1)';
+                    }, 100);
+                } catch (error) {
+                    console.error('Error in resetZoomBtn onclick:', error);
+                }
+            };
+        }
+        
+        // 차트 최대 인원 설정
+        const chartMaxUsers = document.getElementById('chartMaxUsers');
+        if (chartMaxUsers) {
+            // 저장된 값 불러오기
+            const savedValue = localStorage.getItem('maxChartUsers');
+            if (savedValue) {
+                chartMaxUsers.value = savedValue;
+            }
+            
+            chartMaxUsers.onchange = () => {
+                localStorage.setItem('maxChartUsers', chartMaxUsers.value);
+                // 차트 데이터 업데이트
+                if (dpsChart) {
+                    updateDPSChart();
+                }
+            };
+        }
+        
         // 설정 패널 이벤트
         const settingsBtn = document.getElementById('settingsBtn');
         const settingsClose = document.getElementById('settingsClose');

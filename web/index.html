@@ -77,13 +77,24 @@
                         <i class="fas fa-search-plus"></i> 확대됨
                     </span>
                 </h3>
-                <span style="font-size: 0.75em; color: var(--text-dim);">
-                    <i class="fas fa-mouse" style="font-size: 0.9em;"></i> 휠: 확대/축소
-                </span>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button id="resetZoomBtn" class="chart-control-btn" style="display: none; padding: 4px 8px; font-size: 0.75em; background: var(--bg-hover); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-color); cursor: pointer;">
+                        <i class="fas fa-compress"></i> 줌 리셋
+                    </button>
+                    <select id="chartMaxUsers" style="padding: 4px 8px; font-size: 0.75em; background: var(--bg-hover); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-color);">
+                        <option value="5">5명</option>
+                        <option value="8">8명</option>
+                        <option value="10">10명</option>
+                        <option value="12" selected>12명</option>
+                        <option value="15">15명</option>
+                    </select>
+                    <span style="font-size: 0.75em; color: var(--text-dim);">
+                        <i class="fas fa-mouse" style="font-size: 0.9em;"></i> 휠: 확대/축소 | 드래그: 구간 확대 | 더블클릭: 리셋
+                    </span>
+                </div>
             </div>
             <div style="position: relative; height: 200px; background: var(--bg-soft); border-radius: 8px; padding: 10px;">
                 <canvas id="realtimeDPSChart" style="max-height: 180px;"></canvas>
-                <!-- 줌 리셋 버튼을 차트 내부 우측 상단에 배치 -->
                 <button class="btn tooltip" onclick="resetChartZoom()" 
                     style="position: absolute; top: 15px; right: 15px; 
                            background: rgba(255,255,255,0.1); 

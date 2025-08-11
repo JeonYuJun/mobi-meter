@@ -15,7 +15,7 @@ from aiohttp import web
 import aiohttp_cors
 
 # 버전 정보
-__version__ = "1.2.2"
+__version__ = "1.2.3"
 __description__ = "Mabinogi Real-time Damage Meter"
 
 # 전역 설정 변수
