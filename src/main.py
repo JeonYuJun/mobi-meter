@@ -526,27 +526,10 @@ class PacketStreamer:
         self.connected_websockets.add(websocket)
         await self.start_capture()  # 첫 클라이언트 연결 시 캡처 시작
         
-        # 새 클라이언트에게 현재 데이터 즉시 전송
-        try:
-            # 플래그 임시 저장
-            original_data_changed = self.analyzer._data_changed
-            original_user_updated = self.analyzer._is_user_data_updated
-            
-            # 강제 전송을 위한 플래그 설정
-            self.analyzer._data_changed = True  # send_data가 실행되도록
-            self.analyzer._is_user_data_updated = True  # user 데이터 포함되도록
-            
-            await self.analyzer.send_data(websocket)
-            
-            # 원래 플래그 복원
-            self.analyzer._data_changed = original_data_changed
-            # _is_user_data_updated는 send_data에서 False로 변경되므로 복원 불필요
-            
-            if logger:
-                logger.log("새 클라이언트에게 초기 데이터 전송 완료", "DEBUG")
-        except Exception as e:
-            if logger:
-                logger.log(f"초기 데이터 전송 실패: {e}", "DEBUG")
+        # 클라이언트가 연결되면 클라이언트 측에서 자동으로 clear 명령을 보냄
+        # 따라서 서버에서는 아무 데이터도 전송하지 않음
+        if logger:
+            logger.log("새 클라이언트 연결됨 - 클라이언트 측 자동 초기화 대기", "DEBUG")
     
     # 클라이언트 연결 제거
     async def remove_client(self, websocket):
@@ -562,7 +545,7 @@ class PacketStreamer:
         self.analyzer._self_damage_by_user_by_target_by_skill = {0:{0:{"": CombatDetailData()}}}
         self.analyzer._buff_uptime_by_user_by_target_by_skill = {0:{0:{"": {"": BuffUptimeData()}}}}
         self.analyzer._buff_by_user_by_inst.clear()
-        self.analyzer._time_data.clear()
+        self.analyzer._time_data = {}  # clear() 대신 새 딕셔너리 할당
         self.analyzer._enemy_data = EnemyData()
         self.analyzer._user_tmp_data.clear()
         self.analyzer._user_data.clear()
@@ -570,7 +553,9 @@ class PacketStreamer:
         self.analyzer._max_self_damage_by_user = SimpleDamageData()
         self.analyzer._data_changed = True
         self.analyzer._cached_json_data = None
+        self.analyzer._last_sent_data_hash = None  # 해시도 초기화
         self.analyzer._last_combat_time = time.time()
+        self.analyzer._is_user_data_updated = False  # 유저 데이터 플래그 초기화
         
         # PacketStreamer 버퍼 초기화
         self.buffer = b''
@@ -1240,20 +1225,22 @@ class CombatLogAnalyzer:
         if not self._time_data:
             return 0.0
         
-        # 모든 타겟의 최초 시작 시간과 최종 종료 시간 찾기
-        min_start = float('inf')
-        max_end = 0
+        # 유효한 데이터만 필터링
+        valid_data = []
+        for tid, tid_data in self._time_data.items():
+            if isinstance(tid_data, dict) and tid_data.get("start", 0) > 0 and tid_data.get("end", 0) > 0:
+                valid_data.append(tid_data)
         
-        for tid_data in self._time_data.values():
-            if tid_data.get("start", 0) > 0 and tid_data["start"] < min_start:
-                min_start = tid_data["start"]
-            if tid_data.get("end", 0) > max_end:
-                max_end = tid_data["end"]
-        
-        if min_start == float('inf') or max_end == 0:
+        if not valid_data:
             return 0.0
         
-        return max_end - min_start
+        # 모든 타겟의 최초 시작 시간과 최종 종료 시간 찾기
+        min_start = min(d["start"] for d in valid_data)
+        max_end = max(d["end"] for d in valid_data)
+        
+        # 음수나 비정상적인 값 방지
+        duration = max_end - min_start
+        return max(0.0, duration)
     
     # 버프 가동률 통계 계산 (타격 횟수 기반)
     def _calculate_buff_stats(self) -> dict:

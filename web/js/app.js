@@ -2795,6 +2795,12 @@ function onConnectionChanged(connected) {
         // 연결 성공 이벤트
         ws.onopen = () => {
             onConnectionChanged(true);
+            
+            // 페이지 로드/새로고침 시 자동 초기화
+            clearDB();  // 클라이언트 데이터 초기화
+            ws.send('clear');  // 서버에 초기화 명령
+            renderDamageRanks();  // UI 업데이트
+            console.log('페이지 로드 - 자동 초기화 완료');
         };
 
         // 메시지 수신 이벤트 (서버로부터 데이터 받기)
