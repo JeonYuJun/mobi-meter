@@ -457,6 +457,9 @@ def seq_distance(a, b):
 class PacketStreamer:
     def __init__(self, filter_expr: str = "tcp and src port 16000"):  # 마비노기 서버 포트 16000
         self.queue: asyncio.Queue[Packet] = asyncio.Queue()
+        # 디버그: 필터 표현식 출력
+        if logger:
+            logger.log(f"패킷 캡처 필터: {filter_expr}, 인터페이스: {IFACE}", "INFO")
         self.sniffer = AsyncSniffer(filter=filter_expr, prn=self._enqueue_packet, iface=IFACE)
         self.loop = asyncio.get_event_loop()
         self.buffer:bytes = b''
@@ -469,6 +472,7 @@ class PacketStreamer:
         self.process_task = None  # 패킷 처리 태스크
         self.broadcast_task = None  # 데이터 브로드캐스트 태스크
         self.connected_websockets = set()  # 연결된 웹소켓 추적
+        self.packet_count = 0  # 디버그: 패킷 카운터
 
     # 상태 모니터링
     async def print_status(self):
@@ -608,6 +612,10 @@ class PacketStreamer:
                     logger.log(f"메시지 처리 오류: {e}", "ERROR")
 
     def _enqueue_packet(self, pkt: Packet) -> None:
+        self.packet_count += 1
+        # 디버그: 패킷 캡처 카운터
+        if DEBUG and logger and self.packet_count % 100 == 0:
+            logger.log(f"캡처된 패킷 수: {self.packet_count}", "DEBUG")
         self.loop.call_soon_threadsafe(self.queue.put_nowait, pkt)
 
     # 바이너리 데이터에서 게임 패킷 파싱
@@ -617,12 +625,20 @@ class PacketStreamer:
         res = []
         pivot = 0
         buffer_size = len(data)
+        
+        # 디버그: 원시 데이터 확인
+        if DEBUG and logger and len(data) > 0:
+            logger.log(f"패킷 파싱 시작 - 데이터 크기: {buffer_size} bytes", "DEBUG")
+            # 처음 100바이트만 출력
+            logger.log(f"원시 데이터 (처음 100바이트): {data[:min(100, buffer_size)].hex()}", "DEBUG")
 
         while(pivot < len(data)):
             
             # 패킷 시작 부분 찾기 (마비노기 패킷 시그니처)
             start_pivot = data.find(b'\x68\x27\x00\x00\x00\x00\x00\x00\x00', pivot)
             if start_pivot == -1:
+                if DEBUG and logger and buffer_size > 0:
+                    logger.log(f"패킷 시그니처를 찾을 수 없음 (pivot: {pivot})", "DEBUG")
                 break
             # 패킷 끝 부분 찾기
             if data.find(b'\xe3\x27\x00\x00\x00\x00\x00\x00\x00', start_pivot + 9) == -1:
@@ -653,6 +669,10 @@ class PacketStreamer:
                         parse_func = parse_dict[data_type]
                         content = parse_func(content)
                         res.append(content)
+                        # 디버그: 파싱된 패킷 확인
+                        if DEBUG and logger and content:
+                            if content.get("type") == 4:  # 데미지 패킷
+                                logger.log(f"데미지 패킷 파싱: 유저ID={content.get('user_id')}, 데미지={content.get('damage')}", "DEBUG")
                     else:
                         # 알려지지 않은 패킷 타입
                         if DEBUG:
@@ -682,6 +702,10 @@ class PacketStreamer:
             if pkt.haslayer(Raw):
                 seq = pkt[TCP].seq
                 payload = bytes(pkt[Raw].load)
+                
+                # 디버그: TCP 패킷 수신 확인
+                if DEBUG and logger:
+                    logger.log(f"TCP 패킷 수신 - SEQ: {seq}, 페이로드 크기: {len(payload)} bytes", "DEBUG")
                 
                 if self.current_seq is None:
                     self.current_seq = seq

@@ -2024,10 +2024,12 @@ function checkAutoReset() {
     
     // 설정된 시간 이상 데이터가 없고, 데이터가 있는 경우에만
     if (timeSinceLastData >= autoResetTimeout && getTotalDamage() > 0) {
-        // 자동 초기화 실행 (알림 없이)
+        // 자동 초기화 실행 - clearBtn 클릭 이벤트 실행
         // console.log(`자동 초기화: ${autoResetTimeout/1000}초 동안 데이터 없음`);
-        clearDB();
-        renderDamageRanks();
+        const clearBtn = document.getElementById('clearBtn');
+        if (clearBtn && clearBtn.onclick) {
+            clearBtn.onclick();
+        }
     }
 }
 
