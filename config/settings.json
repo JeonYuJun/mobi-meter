@@ -1,5 +1,6 @@
 {
     "Debug": false,
     "Port": 6519,
-    "Iface": "None"
+    "Iface": "None",
+    "PacketLogging": false
 }

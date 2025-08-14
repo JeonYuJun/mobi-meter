@@ -5,6 +5,7 @@ let reconnectInterval = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_DELAY = 3000; // 3초
+let heartbeatInterval = null; // heartbeat 인터벌
 
 // 데미지 및 버프 데이터베이스
 let damageDB  = {0:{0:{"":{}}}}  // 메인 데미지 DB
@@ -1945,6 +1946,14 @@ function clearDB () {
     hitTime = {};
     userTmpData = null;
     serverStats = {};
+    
+    // 차트 데이터 초기화
+    dpsChartData = [];
+    if (dpsChart && dpsChart.data) {
+        dpsChart.data.labels = [];
+        dpsChart.data.datasets = [];
+        dpsChart.update('none');  // 애니메이션 없이 즉시 업데이트
+    }
 
     selectedDetailUserId = null;
     skillDetailOpened = {};
@@ -2229,13 +2238,13 @@ let html2canvasLoadPromise = null;
 async function loadHtml2Canvas() {
     // 이미 로드됨
     if (window.html2canvas) {
-        console.log('[html2canvas] 이미 로드됨');
+        // html2canvas 이미 로드됨
         return true;
     }
     
     // 이미 로딩 중이면 같은 promise 반환
     if (html2canvasLoadPromise) {
-        console.log('[html2canvas] 로딩 중... 기다리는 중');
+        // html2canvas 로딩 중
         try {
             return await html2canvasLoadPromise;
         } catch (error) {
@@ -2247,12 +2256,12 @@ async function loadHtml2Canvas() {
     
     // 새로운 로드 promise 생성
     html2canvasLoadPromise = new Promise((resolve, reject) => {
-        console.log('[html2canvas] 스크립트 로드 시작');
+        // html2canvas 스크립트 로드 시작
         
         // 이미 스크립트 태그가 있는지 확인
         const existingScript = document.querySelector('script[src*="html2canvas"]');
         if (existingScript) {
-            console.log('[html2canvas] 기존 스크립트 태그 발견');
+            // html2canvas 기존 스크립트 태그 발견
             existingScript.remove(); // 기존 스크립트 제거
         }
         
@@ -2267,12 +2276,12 @@ async function loadHtml2Canvas() {
         
         script.onload = () => {
             clearTimeout(loadTimeout);
-            console.log('[html2canvas] 스크립트 태그 로드 완료');
+            // html2canvas 스크립트 태그 로드 완료
             
             // 전역 객체 확인을 위해 약간 대기
             setTimeout(() => {
                 if (window.html2canvas) {
-                    console.log('[html2canvas] 전역 객체 확인 완료');
+                    // html2canvas 전역 객체 확인 완료
                     resolve(true);
                 } else {
                     console.error('[html2canvas] 전역 객체를 찾을 수 없음');
@@ -2288,12 +2297,12 @@ async function loadHtml2Canvas() {
         };
         
         document.head.appendChild(script);
-        console.log('[html2canvas] 스크립트 태그 추가됨');
+        // html2canvas 스크립트 태그 추가됨
     });
     
     try {
         const result = await html2canvasLoadPromise;
-        console.log('[html2canvas] 로드 성공');
+        // html2canvas 로드 성공
         return result;
     } catch (error) {
         console.error('[html2canvas] 로드 실패:', error);
@@ -2305,7 +2314,7 @@ async function loadHtml2Canvas() {
 
 // 스크린샷 기능  
 window.exportScreenshot = async () => {
-    console.log('[Screenshot] exportScreenshot 시작');
+    // Screenshot export 시작
     
     // 전체 컨테이너 찾기
     const container = document.querySelector('.container');
@@ -2316,14 +2325,14 @@ window.exportScreenshot = async () => {
     }
     
     // html2canvas 라이브러리 로드
-    console.log('[Screenshot] html2canvas 로드 시작');
+    // html2canvas 로드 시작
     const loaded = await loadHtml2Canvas();
     if (!loaded || !window.html2canvas) {
         console.error('[Screenshot] html2canvas 로드 실패');
         showToast('스크린샷 라이브러리를 로드할 수 없습니다', 'error');
         return;
     }
-    console.log('[Screenshot] html2canvas 로드 완료');
+    // html2canvas 로드 완료
     
     // 스타일 변수들
     const originalScrollY = window.scrollY;
@@ -2352,7 +2361,7 @@ window.exportScreenshot = async () => {
         // 레이아웃 계산을 위해 잠시 대기
         await new Promise(resolve => setTimeout(resolve, 200));
         
-        console.log('[Screenshot] canvas 생성 시작');
+        // canvas 생성 시작
         const canvas = await html2canvas(container, {
             backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-color') || '#0f0f0f',
             scale: 2,
@@ -2364,7 +2373,7 @@ window.exportScreenshot = async () => {
             useCORS: true,
             allowTaint: true
         });
-        console.log('[Screenshot] canvas 생성 완료');
+        // canvas 생성 완료
         
         // 원래 스타일로 복원
         originalStyles.forEach(style => {
@@ -2377,7 +2386,7 @@ window.exportScreenshot = async () => {
         window.scrollTo(0, originalScrollY);
         
         // Blob 생성 및 다운로드
-        console.log('[Screenshot] 다운로드 준비');
+        // 다운로드 준비
         canvas.toBlob(blob => {
             if (!blob) {
                 console.error('[Screenshot] Blob 생성 실패');
@@ -2391,7 +2400,7 @@ window.exportScreenshot = async () => {
             a.download = `mobi-meter_${new Date().getTime()}.png`;
             a.click();
             URL.revokeObjectURL(url);
-            console.log('[Screenshot] 다운로드 완료');
+            // 다운로드 완료
             showToast('이미지가 다운로드되었습니다', 'success');
         });
     } catch (err) {
@@ -2415,7 +2424,7 @@ window.exportScreenshot = async () => {
 
 // 클립보드에 이미지 복사
 window.copyToClipboard = async () => {
-    console.log('[Clipboard] copyToClipboard 시작');
+    // Clipboard copy 시작
     
     // 전체 컨테이너 찾기
     const container = document.querySelector('.container');
@@ -2426,14 +2435,14 @@ window.copyToClipboard = async () => {
     }
     
     // html2canvas 라이브러리 로드
-    console.log('[Clipboard] html2canvas 로드 시작');
+    // html2canvas 로드 시작
     const loaded = await loadHtml2Canvas();
     if (!loaded || !window.html2canvas) {
         console.error('[Clipboard] html2canvas 로드 실패');
         showToast('스크린샷 라이브러리를 로드할 수 없습니다', 'error');
         return;
     }
-    console.log('[Clipboard] html2canvas 로드 완료');
+    // html2canvas 로드 완료
     
     try {
         // 스크롤 위치 초기화
@@ -2527,7 +2536,7 @@ window.copyToClipboard = async () => {
 
 // 모달 스크린샷 기능
 window.exportModalScreenshot = async () => {
-    console.log('[Modal Screenshot] exportModalScreenshot 시작');
+    // Modal screenshot export 시작
     
     const modal = document.querySelector('#detailModal .modal-content');
     const modalBody = document.querySelector('#detailModal .modal-body');
@@ -2538,14 +2547,14 @@ window.exportModalScreenshot = async () => {
     }
     
     // html2canvas 라이브러리 로드
-    console.log('[Modal Screenshot] html2canvas 로드 시작');
+    // html2canvas 로드 시작
     const loaded = await loadHtml2Canvas();
     if (!loaded || !window.html2canvas) {
         console.error('[Modal Screenshot] html2canvas 로드 실패');
         showToast('스크린샷 라이브러리를 로드할 수 없습니다', 'error');
         return;
     }
-    console.log('[Modal Screenshot] html2canvas 로드 완료');
+    // html2canvas 로드 완료
     
     // 원래 스타일 저장
     const originalOverflow = modalBody.style.overflow || '';
@@ -2569,7 +2578,7 @@ window.exportModalScreenshot = async () => {
         const fullHeight = modal.scrollHeight;
         
         // 모달 전체 캡처
-        console.log('[Modal Screenshot] canvas 생성 시작');
+        // canvas 생성 시작
         const canvas = await html2canvas(modal, {
             backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-soft') || '#1a1a1a',
             scale: 2,
@@ -2583,7 +2592,7 @@ window.exportModalScreenshot = async () => {
             windowWidth: modal.scrollWidth,
             windowHeight: fullHeight
         });
-        console.log('[Modal Screenshot] canvas 생성 완료');
+        // canvas 생성 완료
         
         // 스타일 원복
         modalBody.style.overflow = originalOverflow;
@@ -2593,7 +2602,7 @@ window.exportModalScreenshot = async () => {
         modal.style.height = originalModalHeight;
         
         // Blob 생성 및 다운로드
-        console.log('[Modal Screenshot] 다운로드 준비');
+        // 다운로드 준비
         canvas.toBlob(blob => {
             if (!blob) {
                 console.error('[Modal Screenshot] Blob 생성 실패');
@@ -2607,7 +2616,7 @@ window.exportModalScreenshot = async () => {
             a.download = `mobi-meter-detail_${new Date().getTime()}.png`;
             a.click();
             URL.revokeObjectURL(url);
-            console.log('[Modal Screenshot] 다운로드 완료');
+            // 다운로드 완료
             showToast('모달 이미지가 다운로드되었습니다', 'success');
         });
     } catch (err) {
@@ -2625,7 +2634,7 @@ window.exportModalScreenshot = async () => {
 
 // 모달 클립보드 복사
 window.copyModalToClipboard = async () => {
-    console.log('[Modal Clipboard] copyModalToClipboard 시작');
+    // Modal clipboard copy 시작
     
     const modal = document.querySelector('#detailModal .modal-content');
     const modalBody = document.querySelector('#detailModal .modal-body');
@@ -2636,14 +2645,14 @@ window.copyModalToClipboard = async () => {
     }
     
     // html2canvas 라이브러리 로드
-    console.log('[Modal Clipboard] html2canvas 로드 시작');
+    // html2canvas 로드 시작
     const loaded = await loadHtml2Canvas();
     if (!loaded || !window.html2canvas) {
         console.error('[Modal Clipboard] html2canvas 로드 실패');
         showToast('스크린샷 라이브러리를 로드할 수 없습니다', 'error');
         return;
     }
-    console.log('[Modal Clipboard] html2canvas 로드 완료');
+    // html2canvas 로드 완료
     
     // 현재 스타일 저장 (try 블록 밖에서 선언)
     const originalOverflow = modalBody.style.overflow || '';
@@ -2775,15 +2784,9 @@ function onConnectionChanged(connected) {
             // UI 즉시 업데이트
             renderDamageRanks();
         } else {
-            // 연결이 없으면 연결 후 clear
-            connect();
-            setTimeout(() => {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send('clear');
-                }
-            }, 100);
-            // 새 연결 시 렌더링
+            // 연결이 없으면 UI만 업데이트 (connect() 호출 제거)
             renderDamageRanks();
+            // WebSocket 연결이 없어 서버 초기화 건너뜀
         }
         // 즉시 렌더링 제거 (재연결 후에만 렌더링)
     };
@@ -2809,21 +2812,40 @@ function onConnectionChanged(connected) {
                 reconnectInterval = null;
             }
             
-            // 페이지 로드/새로고침 시 자동 초기화
-            clearDB();  // 클라이언트 데이터 초기화
-            ws.send('clear');  // 서버에 초기화 명령
-            renderDamageRanks();  // UI 업데이트
-            console.log('WebSocket 연결 성공');
+            // Heartbeat 시작 (30초마다 ping 전송 - 서버 timeout보다 짧게)
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+            }
+            heartbeatInterval = setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    try {
+                        ws.send('ping');
+                    } catch (e) {
+                        // ping 전송 실패 시 재연결
+                        ws.close();
+                    }
+                }
+            }, 30000); // 30초마다 ping (서버 ping_timeout 30초보다 짧게)
+            
+            // 재연결 시에는 데이터를 유지하고, 첫 연결일 때만 초기화
+            // 첫 페이지 로드는 window.onload에서 처리
+            // WebSocket 연결 성공
         };
 
         // 메시지 수신 이벤트 (서버로부터 데이터 받기)
         ws.onmessage = (event) => {
+            // pong 응답 처리 (문자열로 직접 전송되는 경우)
+            if (event.data === 'pong') {
+                // pong 응답 받음 - keepalive 정상
+                return;
+            }
+            
             try {
                 const obj = JSON.parse(event.data);
                 switch (obj.type) {
                     case "clear_confirmed":
                         // 서버에서 clear 확인 메시지
-                        console.log('서버 데이터 초기화 완료');
+                        // 서버 데이터 초기화 완료
                         break;
                     case "damage":
                         damageDB   = obj.data.damage;
@@ -2875,12 +2897,18 @@ function onConnectionChanged(connected) {
             onConnectionChanged(false);
             ws = null;
             
+            // Heartbeat 정리
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+                heartbeatInterval = null;
+            }
+            
             // 정상 종료가 아니면 자동 재연결 시도
             if (event.code !== 1000 && event.code !== 1001) {
-                console.log(`WebSocket 연결 종료 (코드: ${event.code}). 재연결 시도...`);
+                // WebSocket 연결 종료 - 재연결 시도
                 startReconnect();
             } else {
-                console.log('WebSocket 정상 종료');
+                // WebSocket 정상 종료
             }
         };
 
@@ -2896,7 +2924,7 @@ function onConnectionChanged(connected) {
         
         reconnectInterval = setInterval(() => {
             if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-                console.log('최대 재연결 시도 횟수 초과. 재연결 중단.');
+                // 최대 재연결 시도 횟수 초과
                 clearInterval(reconnectInterval);
                 reconnectInterval = null;
                 reconnectAttempts = 0;
@@ -2904,7 +2932,7 @@ function onConnectionChanged(connected) {
             }
             
             reconnectAttempts++;
-            console.log(`재연결 시도 ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}...`);
+            // 재연결 시도
             connect();
         }, RECONNECT_DELAY);
     }
@@ -2912,25 +2940,39 @@ function onConnectionChanged(connected) {
     // 페이지 가시성 변경 감지 (탭 전환 시)
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden && (!ws || ws.readyState !== WebSocket.OPEN)) {
-            console.log('페이지 활성화 - WebSocket 재연결 시도');
+            // 페이지 활성화 - WebSocket 재연결
             connect();
         }
     });
 
     // 온라인/오프라인 상태 감지
     window.addEventListener('online', () => {
-        console.log('네트워크 연결됨 - WebSocket 재연결 시도');
+        // 네트워크 연결됨 - WebSocket 재연결
         connect();
     });
 
     window.addEventListener('offline', () => {
-        console.log('네트워크 연결 끊김');
+        // 네트워크 연결 끊김
         if (ws) {
             ws.close();
         }
     });
 
+    // 첫 페이지 로드 시에만 초기화
+    let isFirstConnection = true;
+    
     connect();
+    
+    // 첫 연결 시 데이터 초기화
+    setTimeout(() => {
+        if (isFirstConnection && ws && ws.readyState === WebSocket.OPEN) {
+            clearDB();  // 클라이언트 데이터 초기화
+            ws.send('clear');  // 서버에 초기화 명령
+            renderDamageRanks();  // UI 업데이트
+            isFirstConnection = false;
+            // 첫 연결 - 데이터 초기화
+        }
+    }, 500);
     
     // DOM 로드 완료 후 이벤트 설정
     if (document.readyState === 'loading') {

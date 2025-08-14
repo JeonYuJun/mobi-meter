@@ -15,7 +15,7 @@ from aiohttp import web
 import aiohttp_cors
 
 # 버전 정보
-__version__ = "1.2.4"
+__version__ = "1.2.5"
 __description__ = "Mabinogi Real-time Damage Meter"
 
 # 전역 설정 변수
@@ -49,7 +49,7 @@ class SystemConstants:
     CLEANUP_INTERVAL = 300  # 5분마다 메모리 정리
     DATA_RETENTION = 1800  # 30분 이상 된 데이터 삭제
     STATUS_INTERVAL = 60  # 1분마다 상태 출력
-    AUTO_SHUTDOWN_DELAY = 60  # 연결이 없을 때 60초 후 자동 종료 (재연결 여유 시간)
+    AUTO_SHUTDOWN_DELAY = 180  # 연결이 없을 때 180초 후 자동 종료 (재연결 여유 시간)
 
 # 간단한 로거 (색상 지원)
 class SimpleLogger:
@@ -465,7 +465,12 @@ class PacketStreamer:
         self.buffer:bytes = b''
         self.tcp_segments = {}
         self.current_seq = None
-        self.analyzer = CombatLogAnalyzer()
+        # 패킷 로깅 옵션 확인
+        global settings
+        packet_logging = settings.get("PacketLogging", False) if 'settings' in globals() else False
+        self.analyzer = CombatLogAnalyzer(packet_logging_enabled=packet_logging)
+        if packet_logging and logger:
+            logger.log("패킷 로깅 활성화됨", "INFO")
         self.is_running = False
         self.status_task = None
         self.cleanup_task = None
@@ -512,6 +517,9 @@ class PacketStreamer:
     async def stop_capture(self):
         if self.is_running:
             self.is_running = False
+            # 패킷 로그 저장
+            if self.analyzer.packet_logger.enabled:
+                self.analyzer.packet_logger.save_to_file()
             if self.status_task:
                 self.status_task.cancel()
             if self.cleanup_task:
@@ -600,6 +608,12 @@ class PacketStreamer:
                             "type": "clear_confirmed",
                             "timestamp": time.time()
                         }))
+                    except Exception:
+                        pass  # 전송 실패 무시
+                elif message == "ping":
+                    # 클라이언트 heartbeat에 pong으로 응답
+                    try:
+                        await websocket.send("pong")
                     except Exception:
                         pass  # 전송 실패 무시
         except asyncio.CancelledError:
@@ -954,10 +968,95 @@ dotFlag2Name = [
     ["dump_flag123", "무속성"]
 ]
 
+# 패킷 로거 클래스
+class PacketLogger:
+    def __init__(self, enabled=False):
+        self.enabled = enabled
+        self.packets = []
+        self.session_start = time.time()
+        self.damage_calculations = []
+        self.packet_counts = {1: 0, 2: 0, 3: 0, 4: 0, 11: 0, 12: 0, 13: 0}
+        
+    def log_packet(self, packet_type, raw_data, processed_data=None):
+        if not self.enabled:
+            return
+            
+        self.packet_counts[packet_type] = self.packet_counts.get(packet_type, 0) + 1
+        
+        log_entry = {
+            "timestamp": time.time(),
+            "type": packet_type,
+            "raw_data": raw_data,
+            "processed": processed_data
+        }
+        
+        self.packets.append(log_entry)
+        
+        # 10000개 넘으면 저장하고 일부만 유지
+        if len(self.packets) > 10000:
+            self.save_to_file()
+            # 최근 1000개만 유지
+            self.packets = self.packets[-1000:]
+            self.damage_calculations = self.damage_calculations[-500:]
+            
+    def log_damage_calculation(self, uid, tid, damage, source, skill=""):
+        if not self.enabled:
+            return
+            
+        calc_entry = {
+            "timestamp": time.time(),
+            "uid": uid,
+            "tid": tid,
+            "damage": damage,
+            "source": source,
+            "skill": skill
+        }
+        
+        self.damage_calculations.append(calc_entry)
+        
+    def save_to_file(self):
+        if not self.enabled or len(self.packets) == 0:
+            return
+            
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"packet_log_{timestamp}.json"
+        
+        summary = {
+            "session_start": datetime.fromtimestamp(self.session_start).isoformat(),
+            "session_end": datetime.now().isoformat(),
+            "packet_counts": self.packet_counts,
+            "total_packets": len(self.packets),
+            "damage_calculations": len(self.damage_calculations)
+        }
+        
+        log_data = {
+            "summary": summary,
+            "packets": self.packets[-5000:],  # 최근 5000개만 저장
+            "damage_calculations": self.damage_calculations[-2000:]  # 최근 2000개만
+        }
+        
+        try:
+            import os
+            os.makedirs("packet_logs", exist_ok=True)
+            filepath = os.path.join("packet_logs", filename)
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(log_data, f, ensure_ascii=False, indent=2)
+                
+            if logger:
+                logger.log(f"패킷 로그 저장: {filepath}", "INFO")
+        except Exception as e:
+            if logger:
+                logger.log(f"패킷 로그 저장 실패: {e}", "ERROR")
+
 # 전투 로그를 분석하고 통계를 생성하는 메인 분석 클래스
 class CombatLogAnalyzer:
-    def __init__(self):
+    def __init__(self, packet_logging_enabled=False):
         self._raw_data: Dict[int, Any] = {}
+        
+        # 패킷 로거 초기화
+        self.packet_logger = PacketLogger(enabled=packet_logging_enabled)
 
         # 메인 데이터베이스
         self._damage_by_user_by_target_by_skill: DamageContainer = {0:{0:{"": CombatDetailData()}}}
@@ -1134,6 +1233,9 @@ class CombatLogAnalyzer:
     def update(self, entry):
         type = entry["type"]
         
+        # 패킷 로깅
+        self.packet_logger.log_packet(type, entry)
+        
         # 데이터 변경 표시 및 전투 시간 업데이트
         self._data_changed = True
         self._last_combat_time = time.time()
@@ -1166,6 +1268,8 @@ class CombatLogAnalyzer:
                         CombatLogAnalyzer._update_combat(self._damage_by_user_by_target_by_skill, 
                                                          uid, tid, damage, flags, skill, utdata)
                         is_updated = True
+                        # 데미지 계산 로깅
+                        self.packet_logger.log_damage_calculation(uid, tid, damage, "type1+3", skill)
                         self._raw_data[3] = None  # 사용한 패킷은 초기화
 
             # 자가 데미지 패킷과 매칭 (타입 4)
@@ -1178,6 +1282,8 @@ class CombatLogAnalyzer:
                     if damage > 0:  # 데미지가 양수일 때만
                         CombatLogAnalyzer._update_combat(self._self_damage_by_user_by_target_by_skill, 
                                                          uid, tid, damage, flags, skill, utdata)
+                        # 데미지 계산 로깅
+                        self.packet_logger.log_damage_calculation(uid, tid, damage, "type1+4", skill)
                         CombatLogAnalyzer._update_enemy_data(self._enemy_data, tid, 0, self._self_damage_by_user_by_target_by_skill[0][tid][""].all.total_damage)
                         is_updated = True
                         self._raw_data[4] = None  # 사용한 패킷은 초기화
@@ -1222,6 +1328,11 @@ class CombatLogAnalyzer:
             if self._max_self_damage_by_user.total_damage < self_damage.total_damage:
                 self._max_self_damage_by_user.id = uid
                 self._max_self_damage_by_user.total_damage = self_damage.total_damage
+            
+            # Type 4 독립 처리 로깅
+            tid = entry.get("target_id", 0)
+            if tid:
+                self.packet_logger.log_damage_calculation(uid, tid, damage, "type4", "")
 
         elif type == 11 or type == 12:  # 버프 시작/업데이트 패킷
             buff_key = str(entry.get("buff_key",0))
@@ -1737,11 +1848,11 @@ async def main() -> None:
         '0.0.0.0', 
         PORT, 
         max_size=10_000_000,
-        ping_interval=30,  # 30초마다 ping 전송
-        ping_timeout=10,   # 10초 내 pong 응답 대기
-        close_timeout=10   # 연결 종료 시 10초 대기
+        ping_interval=120,  # 120초마다 ping 전송 (클라이언트 ping과 겹치지 않게)
+        ping_timeout=60,    # 60초 내 pong 응답 대기 (충분한 시간)
+        close_timeout=10    # 연결 종료 시 10초 대기
     )
-    logger.log(f"WebSocket 서버 시작 완료 - 포트: {PORT} (Ping 간격: 30초)", "IMPORTANT")
+    logger.log(f"WebSocket 서버 시작 완료 - 포트: {PORT}", "IMPORTANT")
     logger.log("실시간 데미지 측정 대기중...", "INFO")
     logger.log("관리자 권한으로 실행하세요", "WARNING")
     print("="*70)
@@ -1832,22 +1943,27 @@ if __name__ == '__main__':
     settings_path = os.path.join(base_path, 'config', 'settings.json')
     # temp_logger.log("DEBUG", f"설정 파일 경로: {settings_path}")
     
+    # 전역 settings 변수 초기화
+    global settings
+    settings = {}
+    
     try:
         with open(settings_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            DEBUG   = data.get("Debug", False)
-            PORT    = data.get("Port", 8080)
-            IFACE    = data.get("Iface", None)
+            settings = json.load(f)  # 전체 설정을 전역 변수에 저장
+            DEBUG   = settings.get("Debug", False)
+            PORT    = settings.get("Port", 8080)
+            IFACE    = settings.get("Iface", None)
             if IFACE == "None": IFACE = None
             # temp_logger.log("INFO", f"설정 파일 로드 성공 - Debug={DEBUG}")
     except FileNotFoundError:
         # temp_logger.log("INFO", "settings.json 없음 - 기본값 사용")
+        settings = {"Debug": False, "Port": 8080, "Iface": None, "PacketLogging": False}
         DEBUG = False
         PORT = 8080
         IFACE = None
     except Exception as e:
         # temp_logger.log("ERROR", f"설정 파일 로드 실패: {e}")
-        pass
+        settings = {"Debug": False, "Port": 8080, "Iface": None, "PacketLogging": False}
         DEBUG = False
         PORT = 8080
         IFACE = None
