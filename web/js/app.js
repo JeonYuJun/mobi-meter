@@ -2237,7 +2237,17 @@ function setupSaveButton() {
         selfID,
         enemyData,
         userData,
-        hitTime
+        hitTime,
+        userTmpData,      // 추가 - 임시 유저 데이터 (버프 상세)
+        serverStats,      // 추가 - 서버 통계 데이터
+        globalStats: window.globalStats || {},  // 추가 - 슬라이딩 DPS 등
+        dpsChartData: dpsChart && dpsChart.data ? {  // 차트 데이터 구조 개선
+            labels: dpsChart.data.labels,
+            datasets: dpsChart.data.datasets
+        } : null,
+        userDpsHistory,   // 추가 - 유저별 DPS 히스토리
+        savedRuntime: getRuntimeSec(),  // 저장 시점의 런타임 고정
+        savedTime: Date.now()  // 저장 시점 타임스탬프
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], {type: "application/json"});
     const url = URL.createObjectURL(blob);
@@ -2286,8 +2296,63 @@ function setupLoadButton() {
             Object.assign(userData, data.userData || {});
             Object.assign(hitTime, data.hitTime || {});
             selfID = data.selfID;
+            
+            // 누락된 데이터 복원 추가
+            userTmpData = data.userTmpData || {};
+            serverStats = data.serverStats || {};
+            if (data.globalStats) {
+                window.globalStats = data.globalStats;
+            }
+            userDpsHistory = data.userDpsHistory || {};
+            
+            // 런타임 보정 - 저장 시점의 런타임 사용
+            const savedRuntime = data.savedRuntime || 0;
+            const savedTime = data.savedTime || Date.now();
+            
+            // hitTime 보정 - 저장된 런타임과 일치하도록
+            Object.keys(hitTime).forEach(tid => {
+                if (hitTime[tid] && savedRuntime > 0) {
+                    // end 시간을 저장 시점 기준으로 고정
+                    const duration = hitTime[tid].end - hitTime[tid].start;
+                    if (duration !== savedRuntime) {
+                        hitTime[tid].end = hitTime[tid].start + savedRuntime;
+                    }
+                }
+            });
+            
+            // 뷰모드 복원 (localStorage에서)
+            viewMode = localStorage.getItem('viewMode') || 'card';
 
             renderDamageRanks();
+            
+            // 차트 데이터가 있으면 차트도 업데이트
+            if (data.dpsChartData) {
+                // 차트 패널이 활성화되어 있으면 표시
+                const chartToggle = document.getElementById('chartToggle');
+                const chartPanel = document.getElementById('chartPanel');
+                
+                if (chartToggle && chartToggle.classList.contains('active')) {
+                    if (chartPanel) {
+                        chartPanel.style.display = 'block';
+                    }
+                    
+                    // 차트 재초기화 및 데이터 복원
+                    if (!dpsChart) {
+                        initDPSChart();
+                    }
+                    
+                    // 차트 데이터 복원 - 올바른 구조로
+                    setTimeout(() => {
+                        if (dpsChart && dpsChart.data && data.dpsChartData) {
+                            // 저장된 차트 데이터로 복원
+                            dpsChart.data.labels = data.dpsChartData.labels || [];
+                            dpsChart.data.datasets = data.dpsChartData.datasets || [];
+                            dpsChart.update('none');
+                        }
+                    }, 100);
+                }
+            }
+            
             // alert('데이터를 성공적으로 불러왔습니다.');
         } catch (err) {
             alert('불러오기 실패: ' + err);
