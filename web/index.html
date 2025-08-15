@@ -20,51 +20,54 @@
 <body>
     <div class="container">
         <div class="panel">
-            <div class="options-bar"> 
-                <div style="display: flex; gap: 8px; align-items: center;">
-                    <button class="btn btn-with-text" id="connectBtn">
+            <div class="toolbar">
+                <!-- 핵심 액션 그룹 -->
+                <div class="toolbar-primary">
+                    <button class="btn btn-secondary" id="connectBtn">
                         <i class="fas fa-plug"></i>
                         <span class="btn-text">연결</span>
                         <span id="connectSym" class="status-indicator"></span>
                     </button>
-                    <button id="clearBtn" class="btn btn-with-text">
+                    <button id="clearBtn" class="btn btn-secondary">
                         <i class="fas fa-trash"></i>
                         <span class="btn-text">초기화</span>
                     </button>
-                    <button id="saveAllBtn" class="btn btn-with-text">
-                        <i class="fas fa-save"></i>
-                        <span class="btn-text">저장</span>
-                    </button>
-                    <button id="loadAllBtn" class="btn btn-with-text">
-                        <i class="fas fa-folder-open"></i>
-                        <span class="btn-text">불러오기</span>
-                    </button>
-                    <button id="exportBtn" class="btn btn-with-text">
-                        <i class="fas fa-file-export"></i>
-                        <span class="btn-text">내보내기</span>
-                    </button>
+                    
+                    <!-- 파일 드롭다운 -->
+                    <div class="dropdown">
+                        <button class="btn btn-tertiary dropdown-toggle" id="fileDropdownToggle">
+                            <i class="fas fa-folder"></i>
+                            <span class="btn-text">파일</span>
+                            <i class="fas fa-chevron-down dropdown-arrow"></i>
+                        </button>
+                    </div>
                 </div>
                 
-                <div style="display: flex; gap: 8px; align-items: center;">
-                    <label for="calcmodechkbox" style="display: flex; align-items: center; gap: 6px;">
-                        <i class="fas fa-calculator"></i>
-                        <select id="calcmodechkbox" class="combobox" name="calcmode">
-                            <option value="all">모두</option>
-                            <option value="highest_hp">최대 HP</option>
-                            <option value="most_attacked">딜 집중</option>
-                        </select>
-                    </label>
-                    <label class="tooltip" style="display: flex; align-items: center; gap: 6px;">
+                <!-- 보조 옵션 그룹 -->
+                <div class="toolbar-secondary">
+                    <!-- 계산 모드 드롭다운 -->
+                    <div class="dropdown">
+                        <button class="btn btn-tertiary dropdown-toggle" id="calcModeToggle">
+                            <i class="fas fa-calculator"></i>
+                            <span class="btn-text" id="calcModeText">모두</span>
+                            <i class="fas fa-chevron-down dropdown-arrow"></i>
+                        </button>
+                    </div>
+                    
+                    <label class="toggle-option tooltip">
                         <i class="fas fa-bullseye"></i>
                         <input type="checkbox" id="singleModeCheckbox">
                         <span class="tooltip-text">허수아비 모드</span>
                     </label>
                 </div>
                 
-                <button id="settingsBtn" class="btn btn-with-text" style="margin-left: auto;">
-                    <i class="fas fa-cog"></i>
-                    <span class="btn-text">설정</span>
-                </button>
+                <!-- 설정 -->
+                <div class="toolbar-settings">
+                    <button id="settingsBtn" class="btn btn-ghost">
+                        <i class="fas fa-cog"></i>
+                        <span class="btn-text">설정</span>
+                    </button>
+                </div>
             </div>
         </div>
         
@@ -239,22 +242,65 @@
                 <div class="setting-label">
                     <span><i class="fas fa-th"></i> 뷰 모드</span>
                 </div>
-                <select id="viewModeSelect" class="combobox" style="width: 100%; margin-top: 8px;">
-                    <option value="card">카드형</option>
-                    <option value="list">리스트형</option>
-                </select>
+                <div class="dropdown" style="width: 100%; margin-top: 8px;">
+                    <button class="btn btn-tertiary dropdown-toggle" id="viewModeToggle" style="width: 100%; justify-content: space-between; text-align: left;">
+                        <span style="display: flex; align-items: center; gap: 8px;">
+                            <i class="fas fa-th"></i>
+                            <span id="viewModeText">카드형</span>
+                        </span>
+                        <i class="fas fa-chevron-down dropdown-arrow"></i>
+                    </button>
+                </div>
                 <p style="font-size: 0.85em; color: var(--text-dim); margin: 4px 0 0 0;">데미지 통계 표시 방식을 변경합니다.</p>
             </div>
         </div>
     </div>
     
-    <!-- 내보내기 메뉴 (최상위 레벨) -->
-    <div id="exportMenu" class="dropdown-menu" style="display: none; position: fixed;">
+    <!-- 계산 모드 드롭다운 메뉴 (최상위 레벨) -->
+    <div id="calcModeMenu" class="dropdown-menu-absolute" style="display: none;">
+        <button class="dropdown-item calc-mode-item" data-value="all">
+            <i class="fas fa-users"></i>
+            <span>모두</span>
+        </button>
+        <button class="dropdown-item calc-mode-item" data-value="highest_hp">
+            <i class="fas fa-heart"></i>
+            <span>최대 HP</span>
+        </button>
+        <button class="dropdown-item calc-mode-item" data-value="most_attacked">
+            <i class="fas fa-crosshairs"></i>
+            <span>딜 집중</span>
+        </button>
+    </div>
+    
+    <!-- 파일 드롭다운 메뉴 (최상위 레벨) -->
+    <div id="fileDropdownMenu" class="dropdown-menu-absolute" style="display: none;">
+        <button id="saveAllBtn" class="dropdown-item">
+            <i class="fas fa-save"></i>
+            <span>데이터 저장</span>
+        </button>
+        <button id="loadAllBtn" class="dropdown-item">
+            <i class="fas fa-folder-open"></i>
+            <span>데이터 불러오기</span>
+        </button>
         <button class="dropdown-item" onclick="exportScreenshot()">
-            <i class="fas fa-download"></i> 이미지 다운로드
+            <i class="fas fa-download"></i>
+            <span>이미지 저장</span>
         </button>
         <button class="dropdown-item" onclick="copyToClipboard()">
-            <i class="fas fa-copy"></i> 이미지 복사
+            <i class="fas fa-copy"></i>
+            <span>이미지 캡처</span>
+        </button>
+    </div>
+    
+    <!-- 뷰모드 드롭다운 메뉴 (최상위 레벨) -->
+    <div id="viewModeMenu" class="dropdown-menu-absolute" style="display: none;">
+        <button class="dropdown-item view-mode-item" data-value="card">
+            <i class="fas fa-id-card"></i>
+            <span>카드형</span>
+        </button>
+        <button class="dropdown-item view-mode-item" data-value="list">
+            <i class="fas fa-list"></i>
+            <span>리스트형</span>
         </button>
     </div>
     

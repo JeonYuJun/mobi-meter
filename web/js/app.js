@@ -2033,6 +2033,9 @@ function checkAutoReset() {
     
     // 설정된 시간 이상 데이터가 없고, 데이터가 있는 경우에만
     if (timeSinceLastData >= autoResetTimeout && getTotalDamage() > 0) {
+        // 자동 초기화 알림 표시
+        showToast(`${autoResetTimeout/1000}초 동안 데이터가 없어 자동 초기화됩니다`, 'info');
+        
         // 자동 초기화 실행 - clearBtn 클릭 이벤트 실행
         // console.log(`자동 초기화: ${autoResetTimeout/1000}초 동안 데이터 없음`);
         const clearBtn = document.getElementById('clearBtn');
@@ -2052,23 +2055,81 @@ function startAutoResetTimer() {
 
 (function() {
     singleMode = localStorage.getItem('singleMode') === 'true';
-    bossMode = localStorage.getItem('bossMode') ?? "모두";
+    bossMode = localStorage.getItem('bossMode') ?? "all";
     buffVisibleTypes = JSON.parse(localStorage.getItem('buffVisibleTypes')) || {};
 
-    const calcModeCheckBox = document.getElementById('calcmodechkbox');
+    // 계산 모드 드롭다운 설정
+    function setupCalcModeDropdown() {
+        const calcModeToggle = document.getElementById('calcModeToggle');
+        const calcModeMenu = document.getElementById('calcModeMenu');
+        const calcModeText = document.getElementById('calcModeText');
+        const calcModeItems = document.querySelectorAll('.calc-mode-item');
+        
+        if (calcModeToggle && calcModeMenu) {
+            // 초기값 설정
+            const modeTexts = {
+                'all': '모두',
+                'highest_hp': '최대 HP',
+                'most_attacked': '딜 집중'
+            };
+            calcModeText.textContent = modeTexts[bossMode] || '모두';
+            
+            // 드롭다운 토글
+            calcModeToggle.onclick = (e) => {
+                e.stopPropagation();
+                const isOpen = calcModeMenu.style.display === 'block';
+                
+                if (!isOpen) {
+                    const rect = calcModeToggle.getBoundingClientRect();
+                    calcModeMenu.style.top = (rect.bottom + 4) + 'px';
+                    calcModeMenu.style.left = rect.left + 'px';
+                    calcModeMenu.style.display = 'block';
+                    calcModeToggle.parentElement.classList.add('open');
+                } else {
+                    calcModeMenu.style.display = 'none';
+                    calcModeToggle.parentElement.classList.remove('open');
+                }
+            };
+            
+            // 메뉴 아이템 클릭
+            calcModeItems.forEach(item => {
+                item.onclick = () => {
+                    const value = item.getAttribute('data-value');
+                    bossMode = value;
+                    calcModeText.textContent = modeTexts[value];
+                    calcModeMenu.style.display = 'none';
+                    calcModeToggle.parentElement.classList.remove('open');
+                    renderDamageRanks();
+                    localStorage.setItem('bossMode', bossMode);
+                };
+            });
+            
+            // 외부 클릭 시 닫기
+            document.addEventListener('click', (e) => {
+                if (!calcModeToggle.contains(e.target) && !calcModeMenu.contains(e.target)) {
+                    calcModeMenu.style.display = 'none';
+                    calcModeToggle.parentElement.classList.remove('open');
+                }
+            });
+        }
+    }
+    
+    // DOM 로드 후 실행
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', setupCalcModeDropdown);
+    } else {
+        setupCalcModeDropdown();
+    }
+    
     const singleModeCheckbox = document.getElementById('singleModeCheckbox');
-    calcModeCheckBox.onchange = () => {
-        bossMode = calcModeCheckBox.value;                
-        renderDamageRanks();
-        localStorage.setItem('bossMode', bossMode);
-    };
-    singleModeCheckbox.onchange = () => {
-        singleMode = singleModeCheckbox.checked;                
-        renderDamageRanks();
-        localStorage.setItem('singleMode', singleMode);
-    };
-    singleModeCheckbox.checked = singleMode
-    calcModeCheckBox.value = bossMode
+    if (singleModeCheckbox) {
+        singleModeCheckbox.onchange = () => {
+            singleMode = singleModeCheckbox.checked;                
+            renderDamageRanks();
+            localStorage.setItem('singleMode', singleMode);
+        };
+        singleModeCheckbox.checked = singleMode;
+    }
 
 
     const group = document.getElementById('buff-radio-groups');
@@ -2127,8 +2188,8 @@ function startAutoResetTimer() {
 
 })();
 
-// 저장 버튼 이벤트
-document.addEventListener('DOMContentLoaded', () => {
+// 저장 버튼 이벤트 설정 함수
+function setupSaveButton() {
     const saveAllBtn = document.getElementById('saveAllBtn');
     if (saveAllBtn) {
         saveAllBtn.onclick = () => {
@@ -2164,10 +2225,12 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         }, 100);
-    };
+        };
     }
-    
-    // 데이터 불러오기 버튼 및 파일 input 생성
+}
+
+// 불러오기 버튼 이벤트 설정 함수
+function setupLoadButton() {
     const loadAllBtn = document.getElementById('loadAllBtn');
     if (loadAllBtn) {
         let fileInput = document.createElement('input');
@@ -2208,29 +2271,95 @@ document.addEventListener('DOMContentLoaded', () => {
         reader.readAsText(file, 'utf-8');
         };
     }
-});
+}
 
-// 내보내기 메뉴 토글
-document.getElementById('exportBtn').onclick = (e) => {
-    e.stopPropagation();
-    const btn = document.getElementById('exportBtn');
-    const menu = document.getElementById('exportMenu');
+// 뷰 모드 드롭다운 설정 함수
+function setupViewModeDropdown() {
+    const viewModeToggle = document.getElementById('viewModeToggle');
+    const viewModeMenu = document.getElementById('viewModeMenu');
+    const viewModeText = document.getElementById('viewModeText');
+    const viewModeItems = document.querySelectorAll('.view-mode-item');
     
-    if (menu.style.display === 'none') {
-        // 버튼의 위치를 가져와서 메뉴 위치 설정
-        const rect = btn.getBoundingClientRect();
-        menu.style.top = (rect.bottom + 5) + 'px';
-        menu.style.left = Math.max(10, rect.left - 100) + 'px'; // 메뉴가 버튼보다 넓으므로 조정
-        menu.style.display = 'block';
-    } else {
-        menu.style.display = 'none';
+    if (viewModeToggle && viewModeMenu) {
+        // 드롭다운 토글
+        viewModeToggle.onclick = (e) => {
+            e.stopPropagation();
+            const isOpen = viewModeMenu.style.display === 'block';
+            
+            if (!isOpen) {
+                const rect = viewModeToggle.getBoundingClientRect();
+                viewModeMenu.style.top = (rect.bottom + 4) + 'px';
+                viewModeMenu.style.left = rect.left + 'px';
+                viewModeMenu.style.width = rect.width + 'px';
+                viewModeMenu.style.display = 'block';
+                viewModeToggle.parentElement.classList.add('open');
+            } else {
+                viewModeMenu.style.display = 'none';
+                viewModeToggle.parentElement.classList.remove('open');
+            }
+        };
+        
+        // 메뉴 아이템 클릭
+        viewModeItems.forEach(item => {
+            item.onclick = () => {
+                const value = item.getAttribute('data-value');
+                const text = value === 'list' ? '리스트형' : '카드형';
+                
+                viewMode = value;
+                viewModeText.textContent = text;
+                viewModeMenu.style.display = 'none';
+                viewModeToggle.parentElement.classList.remove('open');
+                
+                // 저장 및 렌더링
+                localStorage.setItem('viewMode', viewMode);
+                lastRenderHash = null;  // 렌더 해시 리셋
+                renderDamageRanks();
+            };
+        });
+        
+        // 외부 클릭 시 닫기
+        document.addEventListener('click', (e) => {
+            if (!viewModeToggle.contains(e.target) && !viewModeMenu.contains(e.target)) {
+                viewModeMenu.style.display = 'none';
+                viewModeToggle.parentElement.classList.remove('open');
+            }
+        });
     }
-};
+}
 
-// 클릭 외부 시 메뉴 닫기
-document.addEventListener('click', () => {
-    document.getElementById('exportMenu').style.display = 'none';
-});
+// 파일 드롭다운 메뉴 설정 함수
+function setupFileDropdown() {
+    const fileDropdownToggle = document.getElementById('fileDropdownToggle');
+    const fileDropdownMenu = document.getElementById('fileDropdownMenu');
+    
+    if (fileDropdownToggle && fileDropdownMenu) {
+        // 파일 드롭다운 토글
+        fileDropdownToggle.onclick = (e) => {
+            e.stopPropagation();
+            const isOpen = fileDropdownMenu.style.display === 'block';
+            
+            if (!isOpen) {
+                const rect = fileDropdownToggle.getBoundingClientRect();
+                fileDropdownMenu.style.top = (rect.bottom + 4) + 'px';
+                fileDropdownMenu.style.left = rect.left + 'px';
+                fileDropdownMenu.style.display = 'block';
+                fileDropdownToggle.parentElement.classList.add('open');
+            } else {
+                fileDropdownMenu.style.display = 'none';
+                fileDropdownToggle.parentElement.classList.remove('open');
+            }
+        };
+        
+        // 클릭 외부 시 메뉴 닫기
+        document.addEventListener('click', (e) => {
+            if (!fileDropdownToggle.contains(e.target) && 
+                !fileDropdownMenu.contains(e.target)) {
+                fileDropdownMenu.style.display = 'none';
+                fileDropdownToggle.parentElement.classList.remove('open');
+            }
+        });
+    }
+}
 
 // html2canvas 로드 함수
 let html2canvasLoadPromise = null;
@@ -2337,8 +2466,15 @@ window.exportScreenshot = async () => {
     // 스타일 변수들
     const originalScrollY = window.scrollY;
     const originalStyles = [];
+    const originalBodyClass = document.body.className;
     
     try {
+        // 스크린샷 모드 활성화 (애니메이션 + 그라디언트 제거)
+        document.body.classList.add('screenshot-mode');
+        
+        // 스타일 적용을 위한 대기
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
         // 스크롤 위치 초기화
         window.scrollTo(0, 0);
         
@@ -2359,11 +2495,14 @@ window.exportScreenshot = async () => {
         });
         
         // 레이아웃 계산을 위해 잠시 대기
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // 배경색 직접 가져오기 (CSS 변수 대신)
+        const bgColor = '#0f0f0f'; // 다크 테마 기본 색상
         
         // canvas 생성 시작
         const canvas = await html2canvas(container, {
-            backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-color') || '#0f0f0f',
+            backgroundColor: bgColor,
             scale: 2,
             height: container.scrollHeight,
             windowHeight: container.scrollHeight,
@@ -2371,7 +2510,9 @@ window.exportScreenshot = async () => {
             scrollY: -window.scrollY,
             logging: false,
             useCORS: true,
-            allowTaint: true
+            allowTaint: false,
+            foreignObjectRendering: false,
+            removeContainer: true
         });
         // canvas 생성 완료
         
@@ -2384,6 +2525,12 @@ window.exportScreenshot = async () => {
         
         // 스크롤 위치 복원
         window.scrollTo(0, originalScrollY);
+        
+        // 스크린샷 모드 비활성화
+        document.body.classList.remove('screenshot-mode');
+        
+        // 원래 클래스 복원
+        document.body.className = originalBodyClass;
         
         // Blob 생성 및 다운로드
         // 다운로드 준비
@@ -2418,6 +2565,12 @@ window.exportScreenshot = async () => {
         
         // 스크롤 위치 복원
         window.scrollTo(0, originalScrollY);
+        
+        // 스크린샷 모드 비활성화
+        document.body.classList.remove('screenshot-mode');
+        
+        // 원래 클래스 복원
+        document.body.className = originalBodyClass;
     }
 };
 
@@ -2444,7 +2597,15 @@ window.copyToClipboard = async () => {
     }
     // html2canvas 로드 완료
     
+    const originalBodyClass = document.body.className;
+    
     try {
+        // 스크린샷 모드 활성화 (애니메이션 + 그라디언트 제거)
+        document.body.classList.add('screenshot-mode');
+        
+        // 스타일 적용을 위한 대기
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
         // 스크롤 위치 초기화
         const originalScrollY = window.scrollY;
         window.scrollTo(0, 0);
@@ -2467,15 +2628,23 @@ window.copyToClipboard = async () => {
         });
         
         // 잠시 대기
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // 배경색 직접 가져오기 (CSS 변수 대신)
+        const bgColor = '#0f0f0f'; // 다크 테마 기본 색상
         
         const canvas = await html2canvas(container, {
-            backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-color') || '#0f0f0f',
+            backgroundColor: bgColor,
             scale: 2,
             height: container.scrollHeight,
             windowHeight: container.scrollHeight,
             scrollX: 0,
-            scrollY: -window.scrollY
+            scrollY: -window.scrollY,
+            logging: false,
+            useCORS: true,
+            allowTaint: false,
+            foreignObjectRendering: false,
+            removeContainer: true
         });
         
         // 원래 스타일로 복원
@@ -2487,6 +2656,12 @@ window.copyToClipboard = async () => {
         
         // 스크롤 위치 복원
         window.scrollTo(0, originalScrollY);
+        
+        // 스크린샷 모드 비활성화
+        document.body.classList.remove('screenshot-mode');
+        
+        // 원래 클래스 복원
+        document.body.className = originalBodyClass;
         
         canvas.toBlob(async (blob) => {
             try {
@@ -2524,6 +2699,10 @@ window.copyToClipboard = async () => {
     } catch (err) {
         // console.error('스크린샷 실패:', err);
         showToast('이미지 캡처에 실패했습니다.', 'error');
+        
+        // 애니메이션 클래스 복원
+        document.body.className = originalBodyClass;
+        
         // 에러 발생 시에도 스타일 복원
         const scrollElements = container.querySelectorAll('#damage-stats-list, .damage-cards-container');
         scrollElements.forEach(el => {
@@ -2562,8 +2741,15 @@ window.exportModalScreenshot = async () => {
     const originalHeight = modalBody.style.height || '';
     const originalModalMaxHeight = modal.style.maxHeight || '';
     const originalModalHeight = modal.style.height || '';
+    const originalBodyClass = document.body.className;
     
     try {
+        // 스크린샷 모드 활성화 (애니메이션 + 그라디언트 제거)
+        document.body.classList.add('screenshot-mode');
+        
+        // 스타일 적용을 위한 대기
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
         // 스크롤 영역을 전체 표시로 변경
         modalBody.style.overflow = 'visible';
         modalBody.style.maxHeight = 'none';
@@ -2574,19 +2760,24 @@ window.exportModalScreenshot = async () => {
         // 레이아웃 계산을 위해 잠시 대기
         await new Promise(resolve => setTimeout(resolve, 200));
         
-        // 전체 높이 계산
-        const fullHeight = modal.scrollHeight;
+        // 전체 높이 계산 (최대 10000px로 제한)
+        const fullHeight = Math.min(modal.scrollHeight, 10000);
+        
+        // 배경색 직접 가져오기 (CSS 변수 대신)
+        const bgColor = '#1a1a1a'; // 모달 기본 색상
         
         // 모달 전체 캡처
         // canvas 생성 시작
         const canvas = await html2canvas(modal, {
-            backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-soft') || '#1a1a1a',
+            backgroundColor: bgColor,
             scale: 2,
             scrollX: 0,
             scrollY: 0,
             useCORS: true,
             logging: false,
-            allowTaint: true,
+            allowTaint: false,
+            foreignObjectRendering: false,
+            removeContainer: true,
             width: modal.scrollWidth,
             height: fullHeight,
             windowWidth: modal.scrollWidth,
@@ -2600,6 +2791,12 @@ window.exportModalScreenshot = async () => {
         modalBody.style.height = originalHeight;
         modal.style.maxHeight = originalModalMaxHeight;
         modal.style.height = originalModalHeight;
+        
+        // 스크린샷 모드 비활성화
+        document.body.classList.remove('screenshot-mode');
+        
+        // 원래 클래스 복원
+        document.body.className = originalBodyClass;
         
         // Blob 생성 및 다운로드
         // 다운로드 준비
@@ -2622,6 +2819,12 @@ window.exportModalScreenshot = async () => {
     } catch (err) {
         console.error('[Modal Screenshot] 캡처 실패:', err);
         showToast(`모달 캡처 실패: ${err.message || '알 수 없는 오류'}`, 'error');
+        
+        // 스크린샷 모드 비활성화
+        document.body.classList.remove('screenshot-mode');
+        
+        // 원래 클래스 복원
+        document.body.className = originalBodyClass;
         
         // 스타일 원복
         modalBody.style.overflow = originalOverflow;
@@ -2660,8 +2863,14 @@ window.copyModalToClipboard = async () => {
     const originalHeight = modalBody.style.height || '';
     const originalModalMaxHeight = modal.style.maxHeight || '';
     const originalModalHeight = modal.style.height || '';
+    const originalBodyClass = document.body.className;
     
     try {
+        // 스크린샷 모드 활성화 (애니메이션 + 그라디언트 제거)
+        document.body.classList.add('screenshot-mode');
+        
+        // 스타일 적용을 위한 대기
+        await new Promise(resolve => setTimeout(resolve, 500));
         
         // 스크롤 영역을 전체 표시로 변경
         modalBody.style.overflow = 'visible';
@@ -2673,16 +2882,22 @@ window.copyModalToClipboard = async () => {
         // 잠시 대기 (레이아웃 계산을 위해)
         await new Promise(resolve => setTimeout(resolve, 200));
         
-        // 전체 높이 계산
-        const fullHeight = modal.scrollHeight;
+        // 전체 높이 계산 (최대 10000px로 제한)
+        const fullHeight = Math.min(modal.scrollHeight, 10000);
+        
+        // 배경색 직접 가져오기 (CSS 변수 대신)
+        const bgColor = '#1a1a1a'; // 모달 기본 색상
         
         const canvas = await html2canvas(modal, {
-            backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-soft'),
+            backgroundColor: bgColor,
             scale: 2,
             scrollX: 0,
             scrollY: 0,
             useCORS: true,
             logging: false,
+            allowTaint: false,
+            foreignObjectRendering: false,
+            removeContainer: true,
             width: modal.scrollWidth,
             height: fullHeight,
             windowWidth: modal.scrollWidth,
@@ -2695,6 +2910,12 @@ window.copyModalToClipboard = async () => {
         modalBody.style.height = originalHeight;
         modal.style.maxHeight = originalModalMaxHeight;
         modal.style.height = originalModalHeight;
+        
+        // 스크린샷 모드 비활성화
+        document.body.classList.remove('screenshot-mode');
+        
+        // 원래 클래스 복원
+        document.body.className = originalBodyClass;
         
         canvas.toBlob(async (blob) => {
             try {
@@ -2731,6 +2952,10 @@ window.copyModalToClipboard = async () => {
     } catch (err) {
         // console.error('모달 클립보드 복사 실패:', err);
         showToast('클립보드 복사에 실패했습니다.', 'error');
+        
+        // 애니메이션 클래스 복원
+        document.body.className = originalBodyClass;
+        
         // 스타일 원복
         modalBody.style.overflow = originalOverflow;
         modalBody.style.maxHeight = originalMaxHeight;
@@ -2763,33 +2988,6 @@ function onConnectionChanged(connected) {
         ctrl.classList.remove("status-connected")
     }
 }
-    document.getElementById('connectBtn').onclick = () => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.close();
-        }
-        else{
-            connect()
-        }
-    }
-    document.getElementById('clearBtn').onclick = () => {
-        // 재연결 중이면 무시
-        if (reconnectInterval) return;
-        
-        // 모든 데이터 초기화
-        clearDB();
-        
-        // 서버에 clear 명령 전송
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send('clear');
-            // UI 즉시 업데이트
-            renderDamageRanks();
-        } else {
-            // 연결이 없으면 UI만 업데이트 (connect() 호출 제거)
-            renderDamageRanks();
-            // WebSocket 연결이 없어 서버 초기화 건너뜀
-        }
-        // 즉시 렌더링 제거 (재연결 후에만 렌더링)
-    };
 
     // WebSocket 연결 함수
     function connect() {
@@ -2978,6 +3176,9 @@ function onConnectionChanged(connected) {
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
             setupEventListeners();
+            setupSaveButton();
+            setupLoadButton();
+            setupFileDropdown();
             // Chart.js 로딩 대기 후 초기화 준비
             setTimeout(() => {
                 if (typeof Chart !== 'undefined' && window.ChartZoom) {
@@ -2988,6 +3189,9 @@ function onConnectionChanged(connected) {
         });
     } else {
         setupEventListeners();
+        setupSaveButton();
+        setupLoadButton();
+        setupExportMenu();
         // Chart.js 로딩 대기 후 초기화 준비
         setTimeout(() => {
             if (typeof Chart !== 'undefined' && window.ChartZoom) {
@@ -3000,6 +3204,40 @@ function onConnectionChanged(connected) {
     // ========== DOM 이벤트 리스너 설정 ==========
     // DOM이 완전히 로드된 후에 실행
     function setupEventListeners() {
+        // 연결 버튼 이벤트
+        const connectBtn = document.getElementById('connectBtn');
+        if (connectBtn) {
+            connectBtn.onclick = () => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.close();
+                } else {
+                    connect();
+                }
+            };
+        }
+        
+        // 초기화 버튼 이벤트
+        const clearBtn = document.getElementById('clearBtn');
+        if (clearBtn) {
+            clearBtn.onclick = () => {
+                // 재연결 중이면 무시
+                if (reconnectInterval) return;
+                
+                // 모든 데이터 초기화
+                clearDB();
+                
+                // 서버에 clear 명령 전송
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send('clear');
+                    // UI 즉시 업데이트
+                    renderDamageRanks();
+                } else {
+                    // 연결이 없으면 UI만 업데이트
+                    renderDamageRanks();
+                }
+            };
+        }
+        
         // 차트 컨트롤 버튼 이벤트
         const resetZoomBtn = document.getElementById('resetZoomBtn');
         if (resetZoomBtn) {
@@ -3203,17 +3441,8 @@ function onConnectionChanged(connected) {
             };
         }
         
-        // 뷰 모드 변경 (select 요소 사용)
-        const viewModeSelect = document.getElementById('viewModeSelect');
-        if (viewModeSelect) {
-            viewModeSelect.addEventListener('change', () => {
-                viewMode = viewModeSelect.value;
-                localStorage.setItem('viewMode', viewMode);
-                // 렌더 해시를 리셋하여 강제로 다시 렌더링
-                lastRenderHash = null;
-                renderDamageRanks();
-            });
-        }
+        // 뷰 모드 변경 (드롭다운 메뉴)
+        setupViewModeDropdown();
         
         // 저장된 설정 복원
         const savedDarkMode = localStorage.getItem('darkMode') !== 'false';
@@ -3231,8 +3460,9 @@ function onConnectionChanged(connected) {
         }
         
         // 뷰 모드 설정 복원
-        if (viewModeSelect) {
-            viewModeSelect.value = savedViewMode;
+        const viewModeText = document.getElementById('viewModeText');
+        if (viewModeText) {
+            viewModeText.textContent = savedViewMode === 'list' ? '리스트형' : '카드형';
         }
         viewMode = savedViewMode;
     }
