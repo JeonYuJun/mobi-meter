@@ -601,6 +601,16 @@ function updateDPSChart() {
         }
         return;
     }
+    
+    // 차트 객체 유효성 검사
+    if (!dpsChart || !dpsChart.data || !dpsChart.update || typeof dpsChart.update !== 'function') {
+        console.warn('차트 객체가 손상됨, 재초기화 필요');
+        chartInitialized = false;
+        dpsChart = null;
+        initDPSChart();
+        setTimeout(() => updateDPSChart(), 100);
+        return;
+    }
     // 전투 시간 계산 (5초마다 업데이트)
     const combatSeconds = dpsChart.data.labels.length * 5;
     const minutes = Math.floor(combatSeconds / 60);
@@ -718,7 +728,19 @@ function updateDPSChart() {
             console.error('Chart update error:', e);
             // 차트 재초기화 필요
             chartInitialized = false;
+            if (dpsChart && typeof dpsChart.destroy === 'function') {
+                try {
+                    dpsChart.destroy();
+                } catch (destroyError) {
+                    console.error('차트 destroy 오류:', destroyError);
+                }
+            }
             dpsChart = null;
+            // 즉시 재초기화 시도
+            setTimeout(() => {
+                initDPSChart();
+                setTimeout(() => updateDPSChart(), 100);
+            }, 100);
         }
     }
 }
@@ -1964,7 +1986,10 @@ function clearDB () {
     chartInitialized = false;
     if (dpsChart) {
         try {
-            dpsChart.destroy();
+            // 차트 객체가 유효하고 destroy 메서드가 있는지 확인
+            if (typeof dpsChart.destroy === 'function') {
+                dpsChart.destroy();
+            }
         } catch (e) {
             // console.error('차트 제거 중 오류:', e);
         }
