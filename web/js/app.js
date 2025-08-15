@@ -50,8 +50,22 @@ let autoResetTimeout = 60000;    // 기본 60초
 // DPS 차트 초기화
 function initDPSChart() {
     if (chartInitialized && dpsChart) {
-        // console.log('차트가 이미 초기화되어 있습니다');
-        return;
+        // 차트 인스턴스가 유효한지 확인
+        if (dpsChart.canvas && dpsChart.ctx && dpsChart.data && dpsChart.options) {
+            // console.log('차트가 이미 초기화되어 있습니다');
+            return;
+        }
+        // 인스턴스가 손상된 경우 재초기화
+        console.warn('Chart instance corrupted, reinitializing...');
+        chartInitialized = false;
+        if (typeof dpsChart.destroy === 'function') {
+            try {
+                dpsChart.destroy();
+            } catch (e) {
+                console.error('Failed to destroy chart:', e);
+            }
+        }
+        dpsChart = null;
     }
     
     const canvas = document.getElementById('realtimeDPSChart');
@@ -149,22 +163,75 @@ function initDPSChart() {
                         usePointStyle: true,
                         padding: 10,
                         generateLabels: function(chart) {
-                            const original = Chart.defaults.plugins.legend.labels.generateLabels;
-                            const labels = original.call(this, chart);
-                            labels.forEach(label => {
-                                label.strokeStyle = label.hidden ? 'rgba(128,128,128,0.3)' : label.strokeStyle;
-                                label.fillStyle = label.hidden ? 'rgba(128,128,128,0.3)' : label.fillStyle;
-                            });
-                            return labels;
+                            try {
+                                // chart 및 data 유효성 검증
+                                if (!chart || !chart.data || !chart.data.datasets) {
+                                    return [];
+                                }
+                                
+                                // 자체 label 생성 (Chart.defaults 호출하지 않음)
+                                return chart.data.datasets.map((dataset, i) => {
+                                    let isHidden = false;
+                                    
+                                    // isDatasetVisible 메서드 존재 확인
+                                    if (typeof chart.isDatasetVisible === 'function') {
+                                        try {
+                                            isHidden = !chart.isDatasetVisible(i);
+                                        } catch (e) {
+                                            // isDatasetVisible 호출 실패 시 fallback
+                                            isHidden = false;
+                                        }
+                                    } else {
+                                        // fallback: getDatasetMeta 사용
+                                        try {
+                                            const meta = chart.getDatasetMeta(i);
+                                            isHidden = meta ? meta.hidden : false;
+                                        } catch (e) {
+                                            // meta 접근 실패 시 dataset.hidden 사용
+                                            isHidden = dataset.hidden || false;
+                                        }
+                                    }
+                                    
+                                    return {
+                                        text: dataset.label || '',
+                                        fillStyle: isHidden ? 'rgba(128,128,128,0.3)' : (dataset.backgroundColor || 'transparent'),
+                                        strokeStyle: isHidden ? 'rgba(128,128,128,0.3)' : (dataset.borderColor || '#ccc'),
+                                        lineWidth: dataset.borderWidth || 1,
+                                        hidden: isHidden,
+                                        datasetIndex: i,
+                                        fontColor: isHidden ? 'rgba(128,128,128,0.5)' : '#e0e0e0',
+                                        // Chart.js가 요구하는 추가 속성들
+                                        lineCap: dataset.borderCapStyle || 'butt',
+                                        lineDash: dataset.borderDash || [],
+                                        lineDashOffset: dataset.borderDashOffset || 0,
+                                        lineJoin: dataset.borderJoinStyle || 'miter',
+                                        pointStyle: dataset.pointStyle || 'circle',
+                                        rotation: dataset.rotation || 0
+                                    };
+                                });
+                            } catch (e) {
+                                // 모든 오류를 조용히 처리 (콘솔 출력 없음)
+                                return [];
+                            }
                         }
                     },
                     onClick: function(e, legendItem, legend) {
-                        const index = legendItem.datasetIndex;
-                        const chart = legend.chart;
-                        const meta = chart.getDatasetMeta(index);
-                        
-                        meta.hidden = meta.hidden === null ? !chart.data.datasets[index].hidden : null;
-                        chart.update('none');
+                        try {
+                            if (!legendItem || legendItem.datasetIndex === undefined) return;
+                            
+                            const index = legendItem.datasetIndex;
+                            const chart = legend.chart;
+                            
+                            if (!chart || !chart.data || !chart.data.datasets[index]) return;
+                            
+                            const meta = chart.getDatasetMeta(index);
+                            if (meta) {
+                                meta.hidden = meta.hidden === null ? !chart.data.datasets[index].hidden : null;
+                                chart.update('none');
+                            }
+                        } catch (e) {
+                            console.warn('Legend onClick error handled:', e);
+                        }
                     }
                 },
                 tooltip: {
@@ -225,11 +292,11 @@ function initDPSChart() {
                         mode: 'x',  // x축만 줌 (시간축)
                         onZoomStart: function(context) {
                             try {
-                                if (!context || !context.chart || !context.chart.canvas) return false;
+                                if (!context || !context.chart) return false;
                                 const chart = context.chart;
                                 
-                                // Chart.js 내부 메서드 체크
-                                if (!chart.scales || !chart.scales.x || !chart.scales.y) return false;
+                                // 차트 인스턴스 검증
+                                if (!chart.canvas || !chart.ctx || !chart.scales) return false;
                                 
                                 chart.isZooming = true;
                                 
@@ -238,6 +305,7 @@ function initDPSChart() {
                                 if (indicator) {
                                     indicator.style.display = 'inline-block';
                                 }
+                                return true;  // 줌 허용
                             } catch (e) {
                                 console.error('Zoom start error:', e);
                                 return false;
@@ -245,16 +313,18 @@ function initDPSChart() {
                         },
                         onZoomComplete: function(context) {
                             try {
-                                if (!context || !context.chart || !context.chart.canvas) return;
+                                if (!context || !context.chart) return;
                                 const chart = context.chart;
                                 
-                                // Chart.js 내부 메서드 체크
-                                if (!chart.scales || !chart.scales.x || !chart.scales.y) return;
+                                // 차트 인스턴스 검증
+                                if (!chart.canvas || !chart.ctx || !chart.scales) return;
                                 
                                 chart.isZooming = false;
                                 
-                                // 줌 레벨 확인
+                                // 줌 레벨 확인 (안전한 접근)
                                 const xScale = chart.scales.x;
+                                if (!xScale || !xScale.options) return;
+                                
                                 const isZoomed = xScale.min !== xScale.options.min || xScale.max !== xScale.options.max;
                                 
                                 // 줌 표시기와 리셋 버튼 표시/숨김
@@ -270,7 +340,9 @@ function initDPSChart() {
                                 // 줌 레벨이 매우 낮으면 자동 리셋 (거의 전체 보기)
                                 if (isZoomed && xScale.max - xScale.min >= (xScale.options.max - xScale.options.min) * 0.95) {
                                     // 95% 이상 확대된 상태면 자동 리셋
-                                    chart.resetZoom('none');
+                                    if (typeof chart.resetZoom === 'function') {
+                                        chart.resetZoom('none');
+                                    }
                                 }
                             } catch (e) {
                                 console.error('Zoom complete error:', e);
@@ -602,11 +674,32 @@ function updateDPSChart() {
         return;
     }
     
-    // 차트 객체 유효성 검사
-    if (!dpsChart || !dpsChart.data || !dpsChart.update || typeof dpsChart.update !== 'function') {
+    // 차트 객체 유효성 검사 강화
+    if (!dpsChart || !dpsChart.data || !dpsChart.update || typeof dpsChart.update !== 'function' ||
+        !dpsChart.canvas || !dpsChart.ctx || !dpsChart.options) {
         console.warn('차트 객체가 손상됨, 재초기화 필요');
         chartInitialized = false;
+        
+        // 안전한 destroy
+        if (dpsChart && typeof dpsChart.destroy === 'function') {
+            try {
+                dpsChart.destroy();
+            } catch (e) {
+                console.error('Failed to destroy chart:', e);
+            }
+        }
         dpsChart = null;
+        
+        // canvas 재생성
+        const canvas = document.getElementById('realtimeDPSChart');
+        if (canvas && canvas.parentNode) {
+            const parent = canvas.parentNode;
+            const newCanvas = document.createElement('canvas');
+            newCanvas.id = 'realtimeDPSChart';
+            newCanvas.style.maxHeight = '180px';
+            parent.replaceChild(newCanvas, canvas);
+        }
+        
         initDPSChart();
         setTimeout(() => updateDPSChart(), 100);
         return;
@@ -693,7 +786,22 @@ function updateDPSChart() {
     };
     
     // 전체 데이터셋 설정 (평균선 포함)
-    dpsChart.data.datasets = [...newDatasets, averageDataset];
+    // 기존 datasets와 비교하여 변경사항이 있을 때만 업데이트
+    const datasetsChanged = dpsChart.data.datasets.length !== newDatasets.length + 1 ||
+        !dpsChart.data.datasets.every((ds, i) => {
+            const newDs = i < newDatasets.length ? newDatasets[i] : averageDataset;
+            return ds.label === newDs.label;
+        });
+    
+    if (datasetsChanged) {
+        // datasets이 변경된 경우 controller 재초기화를 위해 clear 후 설정
+        dpsChart.data.datasets = [];
+        dpsChart.update('none');
+        dpsChart.data.datasets = [...newDatasets, averageDataset];
+    } else {
+        // datasets 구조가 동일한 경우 데이터만 업데이트
+        dpsChart.data.datasets = [...newDatasets, averageDataset];
+    }
     
     // 각 데이터셋의 최고점 찾기 및 표시
     newDatasets.forEach(dataset => {
@@ -712,31 +820,67 @@ function updateDPSChart() {
     // 차트 업데이트 (줌 상태 유지)
     if (dpsChart && !dpsChart.isZooming) {
         try {
-            // 차트가 삭제되지 않았고 canvas가 연결되어 있는지 확인
-            if (dpsChart.canvas && dpsChart.canvas.parentNode) {
-                // tooltip을 잘못 업데이트시 트리거처 해제
-                if (dpsChart.options && dpsChart.options.plugins && dpsChart.options.plugins.tooltip) {
-                    // 업데이트 전 tooltip 숨기기
-                    if (dpsChart.tooltip) {
-                        dpsChart.tooltip._active = [];
-                        dpsChart.tooltip.update(true);
+            // 차트 인스턴스가 유효한지 검증
+            if (dpsChart.canvas && 
+                dpsChart.canvas.parentNode && 
+                dpsChart.ctx && 
+                dpsChart.data && 
+                dpsChart.options &&
+                typeof dpsChart.update === 'function') {
+                
+                // 모든 dataset의 controller가 준비되었는지 확인
+                const allControllersReady = dpsChart.data.datasets.every((_, index) => {
+                    try {
+                        const meta = dpsChart.getDatasetMeta(index);
+                        return meta && meta.controller && meta.controller._cachedMeta;
+                    } catch (e) {
+                        return false;
                     }
+                });
+                
+                if (allControllersReady) {
+                    // controller가 모두 준비된 경우 즉시 업데이트
+                    dpsChart.update('none');
+                } else {
+                    // controller 초기화 대기 후 업데이트
+                    requestAnimationFrame(() => {
+                        if (dpsChart && typeof dpsChart.update === 'function') {
+                            dpsChart.update('none');
+                        }
+                    });
                 }
-                dpsChart.update('none');
+            } else {
+                // 차트 인스턴스가 손상된 경우 재초기화
+                throw new Error('Chart instance is corrupted');
             }
         } catch (e) {
             console.error('Chart update error:', e);
-            // 차트 재초기화 필요
+            // 차트 재초기화
             chartInitialized = false;
-            if (dpsChart && typeof dpsChart.destroy === 'function') {
+            
+            // 안전한 destroy
+            if (dpsChart) {
                 try {
-                    dpsChart.destroy();
+                    if (typeof dpsChart.destroy === 'function') {
+                        dpsChart.destroy();
+                    }
                 } catch (destroyError) {
                     console.error('차트 destroy 오류:', destroyError);
                 }
+                dpsChart = null;
             }
-            dpsChart = null;
-            // 즉시 재초기화 시도
+            
+            // canvas 요소 재생성
+            const canvas = document.getElementById('realtimeDPSChart');
+            if (canvas && canvas.parentNode) {
+                const parent = canvas.parentNode;
+                const newCanvas = document.createElement('canvas');
+                newCanvas.id = 'realtimeDPSChart';
+                newCanvas.style.maxHeight = '180px';
+                parent.replaceChild(newCanvas, canvas);
+            }
+            
+            // 재초기화 시도
             setTimeout(() => {
                 initDPSChart();
                 setTimeout(() => updateDPSChart(), 100);
