@@ -15,7 +15,7 @@ from aiohttp import web
 import aiohttp_cors
 
 # 버전 정보
-__version__ = "1.2.5"
+__version__ = "1.2.6"
 __description__ = "Mabinogi Real-time Damage Meter"
 
 # 전역 설정 변수
@@ -100,15 +100,15 @@ class SimpleLogger:
         
         # 아이콘 추가 (심플하게)
         icons = {
-            'ERROR': '✖',
-            'WARNING': '⚠',
-            'SUCCESS': '✓',
-            'INFO': '•',
-            'IMPORTANT': '★',
-            'DEBUG': '○'
+            'ERROR': '[X]',
+            'WARNING': '[!]',
+            'SUCCESS': '[O]',
+            'INFO': '[i]',
+            'IMPORTANT': '[*]',
+            'DEBUG': '[-]'
         }
         
-        icon = icons.get(level, '•')
+        icon = icons.get(level, '[.]')
         
         log_msg = f"{self.colors['GRAY']}[{timestamp}]{self.colors['RESET']} {icon} {color}{message}{self.colors['RESET']}"
         
@@ -1663,6 +1663,7 @@ async def handle_http_request(request):
         '/index.html': ('web/index.html', 'text/html'),
         '/styles.css': ('web/css/styles.css', 'text/css'),
         '/app.js': ('web/js/app.js', 'application/javascript'),
+        '/capture-system.js': ('web/js/capture-system.js', 'application/javascript'),
         '/favicon.ico': ('assets/favicon.ico', 'image/x-icon'),
         '/favicon.png': ('assets/favicon.png', 'image/png')
     }
@@ -1732,33 +1733,33 @@ async def main() -> None:
     
     # 심플한 디자인으로 변경
     startup_msg = f"""
-{colors['CYAN']}{'━' * 70}{colors['RESET']}
+{colors['CYAN']}{'=' * 70}{colors['RESET']}
 
-        {colors['BOLD']}{colors['WHITE']}🎮  Mobi-Meter v{__version__}  🎮{colors['RESET']}
+        {colors['BOLD']}{colors['WHITE']}Mobi-Meter v{__version__}{colors['RESET']}
         {colors['YELLOW']}Real-time Damage Meter for Mabinogi{colors['RESET']}
 
-{colors['CYAN']}{'━' * 70}{colors['RESET']}
+{colors['CYAN']}{'=' * 70}{colors['RESET']}
 
-  {colors['GREEN']}📡 WebSocket:{colors['RESET']}  ws://localhost:{PORT}
-  {colors['GREEN']}🌐 HTTP:{colors['RESET']}       http://localhost:{HTTP_PORT}  
-  {colors['BLUE']}📊 대시보드:{colors['RESET']}   http://localhost:{HTTP_PORT}/index.html
+  {colors['GREEN']}WebSocket:{colors['RESET']}  ws://localhost:{PORT}
+  {colors['GREEN']}HTTP:{colors['RESET']}       http://localhost:{HTTP_PORT}  
+  {colors['BLUE']}Dashboard:{colors['RESET']}   http://localhost:{HTTP_PORT}/index.html
 
-{colors['CYAN']}{'━' * 70}{colors['RESET']}
+{colors['CYAN']}{'=' * 70}{colors['RESET']}
 
-  {colors['YELLOW']}💡 종료: Ctrl+C{colors['RESET']}   |   {colors['GREEN']}✅ 서버 실행 중...{colors['RESET']}
+  {colors['YELLOW']}Exit: Ctrl+C{colors['RESET']}   |   {colors['GREEN']}Server Running...{colors['RESET']}
 """
     print(startup_msg)
     
     # 추가 안내 메시지
     print("")  # 빈 줄 추가
-    logger.log("모든 서비스가 정상적으로 시작되었습니다", "SUCCESS")
-    logger.log(f"브라우저에서 http://localhost:{HTTP_PORT} 접속하세요", "INFO")
+    logger.log("All services started successfully", "SUCCESS")
+    logger.log(f"Access http://localhost:{HTTP_PORT} in your browser", "INFO")
     
     async def wsserve(websocket) -> None:
         global CONNECTED_CLIENTS, LAST_CONNECTION_TIME, global_streamer
         client_ip = websocket.remote_address[0]
         if DEBUG:
-            logger.log(f"클라이언트 연결: {client_ip}", "IMPORTANT")
+            logger.log(f"Client connected: {client_ip}", "IMPORTANT")
         
         # 클라이언트 추가
         CONNECTED_CLIENTS.add(websocket)
@@ -1901,7 +1902,7 @@ async def stable_main() -> None:
         except Exception as e:
             restart_count += 1
             error_msg = str(e)
-            logger.log(f"서버 오류 발생 (재시작 {restart_count}/{max_restarts}): {error_msg}", "ERROR")
+            logger.log(f"Server error (restart {restart_count}/{max_restarts}): {error_msg}", "ERROR")
             
             # 포트 충돌 오류 체크
             if "10048" in error_msg or "bind" in error_msg:

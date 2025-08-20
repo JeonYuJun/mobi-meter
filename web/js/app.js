@@ -1142,22 +1142,6 @@ function showDetailModal(uid) {
     renderDetailStats(uid, statsSection);
     modalBody.appendChild(statsSection);
     
-    // 개인 DPS 미니 차트 섹션
-    const chartSection = document.createElement('div');
-    chartSection.style.marginTop = '24px';
-    chartSection.innerHTML = `
-        <h3 style="margin-bottom: 16px;">DPS 추이</h3>
-        <div style="position: relative; height: 150px; background: var(--bg-soft); border-radius: 8px; padding: 10px;">
-            <canvas id="miniDPSChart" style="max-height: 130px;"></canvas>
-        </div>
-    `;
-    modalBody.appendChild(chartSection);
-    
-    // 미니 차트 초기화
-    setTimeout(() => {
-        initMiniDPSChart(uid);
-    }, 100);
-    
     // 버프 섹션
     const buffSection = document.createElement('div');
     buffSection.style.marginTop = '24px';
@@ -2595,88 +2579,15 @@ function setupFileDropdown() {
     }
 }
 
-// html2canvas 로드 함수
-let html2canvasLoadPromise = null;
+// 기존 캡처 함수들은 capture-system.js로 이동됨
+// exportScreenshot, copyToClipboard, exportModalScreenshot, copyModalToClipboard
+// 함수들은 모두 capture-system.js에서 처리됨
 
-async function loadHtml2Canvas() {
-    // 이미 로드됨
-    if (window.html2canvas) {
-        // html2canvas 이미 로드됨
-        return true;
-    }
-    
-    // 이미 로딩 중이면 같은 promise 반환
-    if (html2canvasLoadPromise) {
-        // html2canvas 로딩 중
-        try {
-            return await html2canvasLoadPromise;
-        } catch (error) {
-            console.error('[html2canvas] 로드 실패 (기다리던 중):', error);
-            html2canvasLoadPromise = null;
-            return false;
-        }
-    }
-    
-    // 새로운 로드 promise 생성
-    html2canvasLoadPromise = new Promise((resolve, reject) => {
-        // html2canvas 스크립트 로드 시작
-        
-        // 이미 스크립트 태그가 있는지 확인
-        const existingScript = document.querySelector('script[src*="html2canvas"]');
-        if (existingScript) {
-            // html2canvas 기존 스크립트 태그 발견
-            existingScript.remove(); // 기존 스크립트 제거
-        }
-        
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
-        script.id = 'html2canvas-script';
-        
-        let loadTimeout = setTimeout(() => {
-            console.error('[html2canvas] 로드 타임아웃');
-            reject(new Error('스크립트 로드 타임아웃'));
-        }, 10000);
-        
-        script.onload = () => {
-            clearTimeout(loadTimeout);
-            // html2canvas 스크립트 태그 로드 완료
-            
-            // 전역 객체 확인을 위해 약간 대기
-            setTimeout(() => {
-                if (window.html2canvas) {
-                    // html2canvas 전역 객체 확인 완료
-                    resolve(true);
-                } else {
-                    console.error('[html2canvas] 전역 객체를 찾을 수 없음');
-                    reject(new Error('전역 객체를 찾을 수 없음'));
-                }
-            }, 500);
-        };
-        
-        script.onerror = (error) => {
-            clearTimeout(loadTimeout);
-            console.error('[html2canvas] 스크립트 로드 에러:', error);
-            reject(new Error('스크립트 로드 실패'));
-        };
-        
-        document.head.appendChild(script);
-        // html2canvas 스크립트 태그 추가됨
-    });
-    
-    try {
-        const result = await html2canvasLoadPromise;
-        // html2canvas 로드 성공
-        return result;
-    } catch (error) {
-        console.error('[html2canvas] 로드 실패:', error);
-        html2canvasLoadPromise = null; // 다음 시도를 위해 리셋
-        showToast('이미지 캡처 라이브러리 로드 실패', 'error');
-        return false;
-    }
-}
-
-// 스크린샷 기능  
+// 캡처 관련 함수 제거 - capture-system.js 사용
+/*
 window.exportScreenshot = async () => {
+    // 이전 캡처의 잔여물 정리
+    cleanupTempCanvases();
     // Screenshot export 시작
     
     // 전체 컨테이너 찾기
@@ -2746,7 +2657,21 @@ window.exportScreenshot = async () => {
             useCORS: true,
             allowTaint: false,
             foreignObjectRendering: false,
-            removeContainer: true
+            removeContainer: true,
+            onclone: (clonedDoc) => {
+                // 클론된 문서에서 모달의 그라디언트 배경 제거
+                const clonedModal = clonedDoc.querySelector('#detailModal .modal-content');
+                if (clonedModal) {
+                    clonedModal.style.background = '#1a1a1a';
+                }
+                // 0 크기 canvas 요소들 숨기기
+                const canvases = clonedDoc.querySelectorAll('canvas');
+                canvases.forEach(canvas => {
+                    if (canvas.width === 0 || canvas.height === 0) {
+                        canvas.style.display = 'none';
+                    }
+                });
+            }
         });
         // canvas 생성 완료
         
@@ -2772,6 +2697,9 @@ window.exportScreenshot = async () => {
             if (!blob) {
                 console.error('[Screenshot] Blob 생성 실패');
                 showToast('이미지 생성에 실패했습니다', 'error');
+                // canvas 메모리 해제
+                canvas.width = 0;
+                canvas.height = 0;
                 return;
             }
             
@@ -2783,6 +2711,10 @@ window.exportScreenshot = async () => {
             URL.revokeObjectURL(url);
             // 다운로드 완료
             showToast('이미지가 다운로드되었습니다', 'success');
+            
+            // canvas 메모리 해제
+            canvas.width = 0;
+            canvas.height = 0;
         });
     } catch (err) {
         console.error('[Screenshot] 캡처 실패:', err);
@@ -2805,12 +2737,19 @@ window.exportScreenshot = async () => {
         
         // 원래 클래스 복원
         document.body.className = originalBodyClass;
+    } finally {
+        // 정리 작업 수행
+        setTimeout(() => {
+            cleanupTempCanvases();
+        }, 100);
     }
 };
 
 
 // 클립보드에 이미지 복사
 window.copyToClipboard = async () => {
+    // 이전 캡처의 잔여물 정리
+    cleanupTempCanvases();
     // Clipboard copy 시작
     
     // 전체 컨테이너 찾기
@@ -2878,7 +2817,21 @@ window.copyToClipboard = async () => {
             useCORS: true,
             allowTaint: false,
             foreignObjectRendering: false,
-            removeContainer: true
+            removeContainer: true,
+            onclone: (clonedDoc) => {
+                // 클론된 문서에서 모달의 그라디언트 배경 제거
+                const clonedModal = clonedDoc.querySelector('#detailModal .modal-content');
+                if (clonedModal) {
+                    clonedModal.style.background = '#1a1a1a';
+                }
+                // 0 크기 canvas 요소들 숨기기
+                const canvases = clonedDoc.querySelectorAll('canvas');
+                canvases.forEach(canvas => {
+                    if (canvas.width === 0 || canvas.height === 0) {
+                        canvas.style.display = 'none';
+                    }
+                });
+            }
         });
         
         // 원래 스타일로 복원
@@ -2907,6 +2860,9 @@ window.copyToClipboard = async () => {
                         })
                     ]);
                     showToast('이미지가 클립보드에 복사되었습니다!', 'success');
+                    // canvas 메모리 해제
+                    canvas.width = 0;
+                    canvas.height = 0;
                 } else {
                     // 대체 방법: 다운로드로 안내
                     // console.log('클립보드 API가 지원되지 않아 다운로드합니다.');
@@ -2917,6 +2873,9 @@ window.copyToClipboard = async () => {
                     a.click();
                     URL.revokeObjectURL(url);
                     showToast('클립보드 복사가 지원되지 않아 이미지로 다운로드되었습니다.', 'error');
+                    // canvas 메모리 해제
+                    canvas.width = 0;
+                    canvas.height = 0;
                 }
             } catch (err) {
                 // console.error('클립보드 복사 실패:', err);
@@ -2928,6 +2887,9 @@ window.copyToClipboard = async () => {
                 a.click();
                 URL.revokeObjectURL(url);
                 showToast('클립보드 복사 대신 이미지로 다운로드되었습니다.', 'error');
+                // canvas 메모리 해제
+                canvas.width = 0;
+                canvas.height = 0;
             }
         });
     } catch (err) {
@@ -2948,7 +2910,15 @@ window.copyToClipboard = async () => {
 };
 
 // 모달 스크린샷 기능
-window.exportModalScreenshot = async () => {
+window.exportModalScreenshot = async (event) => {
+    // 이벤트 전파 차단
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    
+    // 이전 캡처의 잔여물 정리
+    cleanupTempCanvases();
     // Modal screenshot export 시작
     
     const modal = document.querySelector('#detailModal .modal-content');
@@ -2997,6 +2967,9 @@ window.exportModalScreenshot = async () => {
         // 전체 높이 계산 (최대 10000px로 제한)
         const fullHeight = Math.min(modal.scrollHeight, 10000);
         
+        // 실제 콘텐츠 너비 계산 (modalBody의 scrollWidth 사용)
+        const actualContentWidth = modalBody.scrollWidth;
+        
         // 배경색 직접 가져오기 (CSS 변수 대신)
         const bgColor = '#1a1a1a'; // 모달 기본 색상
         
@@ -3012,10 +2985,51 @@ window.exportModalScreenshot = async () => {
             allowTaint: false,
             foreignObjectRendering: false,
             removeContainer: true,
-            width: modal.scrollWidth,
+            width: actualContentWidth,
             height: fullHeight,
-            windowWidth: modal.scrollWidth,
-            windowHeight: fullHeight
+            windowWidth: actualContentWidth,
+            windowHeight: fullHeight,
+            ignoreElements: (element) => {
+                // canvas 요소 무시
+                if (element.tagName === 'CANVAS') return true;
+                // chart-container 무시
+                if (element.classList && element.classList.contains('chart-container')) return true;
+                // gradient를 가진 요소 무시
+                const style = window.getComputedStyle(element);
+                if (style.backgroundImage && style.backgroundImage.includes('gradient')) {
+                    return true;
+                }
+                return false;
+            },
+            onclone: (clonedDoc) => {
+                // 클론된 문서에서 모든 gradient 제거
+                const allElements = clonedDoc.querySelectorAll('*');
+                allElements.forEach(el => {
+                    const style = window.getComputedStyle(el);
+                    if (style.backgroundImage && style.backgroundImage.includes('gradient')) {
+                        el.style.backgroundImage = 'none';
+                        el.style.background = '#1a1a1a';
+                    }
+                    if (style.background && style.background.includes('gradient')) {
+                        el.style.background = '#1a1a1a';
+                    }
+                });
+                
+                // 모달 배경 단색 처리
+                const clonedModal = clonedDoc.querySelector('#detailModal .modal-content');
+                if (clonedModal) {
+                    clonedModal.style.background = '#1a1a1a';
+                    clonedModal.style.backgroundImage = 'none';
+                }
+                
+                // canvas 요소 완전 제거
+                const canvases = clonedDoc.querySelectorAll('canvas');
+                canvases.forEach(canvas => canvas.remove());
+                
+                // chart-container 제거
+                const charts = clonedDoc.querySelectorAll('.chart-container');
+                charts.forEach(chart => chart.remove());
+            }
         });
         // canvas 생성 완료
         
@@ -3032,12 +3046,16 @@ window.exportModalScreenshot = async () => {
         // 원래 클래스 복원
         document.body.className = originalBodyClass;
         
+        
         // Blob 생성 및 다운로드
         // 다운로드 준비
         canvas.toBlob(blob => {
             if (!blob) {
                 console.error('[Modal Screenshot] Blob 생성 실패');
                 showToast('이미지 생성에 실패했습니다', 'error');
+                // canvas 메모리 해제
+                canvas.width = 0;
+                canvas.height = 0;
                 return;
             }
             
@@ -3049,16 +3067,14 @@ window.exportModalScreenshot = async () => {
             URL.revokeObjectURL(url);
             // 다운로드 완료
             showToast('모달 이미지가 다운로드되었습니다', 'success');
+            
+            // canvas 메모리 해제
+            canvas.width = 0;
+            canvas.height = 0;
         });
     } catch (err) {
         console.error('[Modal Screenshot] 캡처 실패:', err);
-        showToast(`모달 캡처 실패: ${err.message || '알 수 없는 오류'}`, 'error');
-        
-        // 스크린샷 모드 비활성화
-        document.body.classList.remove('screenshot-mode');
-        
-        // 원래 클래스 복원
-        document.body.className = originalBodyClass;
+        showToast('모달 캡처에 실패했습니다', 'error');
         
         // 스타일 원복
         modalBody.style.overflow = originalOverflow;
@@ -3066,11 +3082,26 @@ window.exportModalScreenshot = async () => {
         modalBody.style.height = originalHeight;
         modal.style.maxHeight = originalModalMaxHeight;
         modal.style.height = originalModalHeight;
+        
+        // 스크린샷 모드 비활성화
+        document.body.classList.remove('screenshot-mode');
+        
+        // 원래 클래스 복원
+        document.body.className = originalBodyClass;
+        
     }
 };
 
 // 모달 클립보드 복사
-window.copyModalToClipboard = async () => {
+window.copyModalToClipboard = async (event) => {
+    // 이벤트 전파 차단
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    
+    // 이전 캡처의 잔여물 정리
+    cleanupTempCanvases();
     // Modal clipboard copy 시작
     
     const modal = document.querySelector('#detailModal .modal-content');
@@ -3119,6 +3150,9 @@ window.copyModalToClipboard = async () => {
         // 전체 높이 계산 (최대 10000px로 제한)
         const fullHeight = Math.min(modal.scrollHeight, 10000);
         
+        // 실제 콘텐츠 너비 계산 (modalBody의 scrollWidth 사용)
+        const actualContentWidth = modalBody.scrollWidth;
+        
         // 배경색 직접 가져오기 (CSS 변수 대신)
         const bgColor = '#1a1a1a'; // 모달 기본 색상
         
@@ -3132,10 +3166,24 @@ window.copyModalToClipboard = async () => {
             allowTaint: false,
             foreignObjectRendering: false,
             removeContainer: true,
-            width: modal.scrollWidth,
+            width: actualContentWidth,
             height: fullHeight,
-            windowWidth: modal.scrollWidth,
-            windowHeight: fullHeight
+            windowWidth: actualContentWidth,
+            windowHeight: fullHeight,
+            onclone: (clonedDoc) => {
+                // 클론된 문서에서 모달의 그라디언트 배경 제거
+                const clonedModal = clonedDoc.querySelector('#detailModal .modal-content');
+                if (clonedModal) {
+                    clonedModal.style.background = '#1a1a1a';
+                }
+                // 0 크기 canvas 요소들 숨기기
+                const canvases = clonedDoc.querySelectorAll('canvas');
+                canvases.forEach(canvas => {
+                    if (canvas.width === 0 || canvas.height === 0) {
+                        canvas.style.display = 'none';
+                    }
+                });
+            }
         });
         
         // 스타일 원복
@@ -3151,6 +3199,7 @@ window.copyModalToClipboard = async () => {
         // 원래 클래스 복원
         document.body.className = originalBodyClass;
         
+        
         canvas.toBlob(async (blob) => {
             try {
                 // 클립보드 API 사용 가능 여부 확인
@@ -3160,6 +3209,9 @@ window.copyModalToClipboard = async () => {
                     ]);
                     // console.log('모달 이미지가 클립보드에 복사되었습니다.');
                     showToast('클립보드에 이미지가 복사되었습니다!', 'success');
+                    // canvas 메모리 해제
+                    canvas.width = 0;
+                    canvas.height = 0;
                 } else {
                     // 대체 방법: 다운로드로 안내
                     // console.log('클립보드 API가 지원되지 않아 다운로드합니다.');
@@ -3170,6 +3222,9 @@ window.copyModalToClipboard = async () => {
                     a.click();
                     URL.revokeObjectURL(url);
                     showToast('클립보드 복사가 지원되지 않아 이미지로 다운로드되었습니다.', 'error');
+                    // canvas 메모리 해제
+                    canvas.width = 0;
+                    canvas.height = 0;
                 }
             } catch (clipboardErr) {
                 // console.error('클립보드 API 실패:', clipboardErr);
@@ -3181,6 +3236,9 @@ window.copyModalToClipboard = async () => {
                 a.click();
                 URL.revokeObjectURL(url);
                 showToast('클립보드 복사 대신 이미지로 다운로드되었습니다.', 'error');
+                // canvas 메모리 해제
+                canvas.width = 0;
+                canvas.height = 0;
             }
         });
     } catch (err) {
@@ -3196,8 +3254,10 @@ window.copyModalToClipboard = async () => {
         modalBody.style.height = originalHeight;
         modal.style.maxHeight = originalModalMaxHeight;
         modal.style.height = originalModalHeight;
+        
     }
 };
+*/
 
 setInterval(() => {
     const elapsed = getRuntimeSec();

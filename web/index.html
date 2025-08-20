@@ -167,6 +167,7 @@
         </div>
     </div>
     <!-- ========== JavaScript 외부 파일 로드 ========== -->
+    <script src="/capture-system.js"></script>
     <script src="/app.js"></script>
     
     <!-- 상세정보 모달 -->
@@ -175,11 +176,11 @@
             <div class="modal-header">
                 <h2 class="modal-title" id="modalTitle">상세 정보</h2>
                 <div style="display: flex; gap: 8px; align-items: center;">
-                    <button class="btn tooltip" onclick="exportModalScreenshot()" style="background: var(--bg-soft); border: 1px solid var(--border-color);">
+                    <button class="btn tooltip" onclick="exportModalScreenshot(event)" style="background: var(--bg-soft); border: 1px solid var(--border-color);">
                         <i class="fas fa-download"></i>
                         <span class="tooltip-text">이미지 다운로드</span>
                     </button>
-                    <button class="btn tooltip" onclick="copyModalToClipboard()" style="background: var(--bg-soft); border: 1px solid var(--border-color);">
+                    <button class="btn tooltip" onclick="copyModalToClipboard(event)" style="background: var(--bg-soft); border: 1px solid var(--border-color);">
                         <i class="fas fa-copy"></i>
                         <span class="tooltip-text">이미지 복사</span>
                     </button>
