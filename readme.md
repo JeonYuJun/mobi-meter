@@ -2,7 +2,7 @@
 
 마비노기 MMORPG용 실시간 전투 데이터 분석 도구입니다. 파티원들의 데미지를 실시간으로 측정하고 다양한 통계를 제공합니다.
 
-![Version](https://img.shields.io/badge/version-1.2.5-blue)
+![Version](https://img.shields.io/badge/version-1.2.6-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
 ## 📋 실행 환경
@@ -13,7 +13,7 @@
 
 ## 🚀 실행 방법
 
-1. **mobi-meter-1.2.5.exe** 파일 실행
+1. **mobi-meter-1.2.6.exe** 파일 실행
 2. 관리자 권한 요청 시 '예' 선택
 3. 브라우저가 자동으로 열립니다
 4. 게임 실행 후 자동으로 데이터 수집 시작
